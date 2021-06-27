@@ -14,7 +14,7 @@ function mount_location_check() {
     echo ""
 	echo "Check current mount location on ${server_name} is: "
         echo ""
-	/mnt/FORENSICS/./mount_location.sh
+	/mnt/FORENSICS/./MOUNT_CHECK.sh
     echo ""
 }
 
@@ -22,7 +22,7 @@ function check_root() {
     echo ""
         echo "Checking for root/sudo priviliges: "
         echo ""
-	/mnt/FORENSICS/./root_check.sh
+	/mnt/FORENSICS/./ROOT_CHECK.sh
     echo ""
 }
 
@@ -30,7 +30,7 @@ function server_baseline_tool() {
     echo ""
         echo "Create Baseline Information for ${server_name}: "
         echo ""
-        /mnt/FORENSICS/./baseline.sh
+        /mnt/FORENSICS/./BASELINE.sh
     echo ""
 }
 
@@ -46,7 +46,7 @@ function forensic_triage_collection_tool() {
     echo ""
 	echo "Create Forensic Triage Collection from ${server_name}: "
         echo ""
-	/mnt/FORENSICS/./triage_collection.sh
+	/mnt/FORENSICS/./FULL_TRIAGE.sh
     echo ""
 }
 
