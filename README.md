@@ -12,7 +12,7 @@ The **Linux Baseline & Forensic Triage** tool is a BASH shell script designed to
 
 The Linux Baseline & Forensics Triage tool is easily customizable and can be modified to collect data and log files that are specific to your environment. The script can be configured to run other tools to generate or collect information related to your system or environment. For instance, both the FAST and FULL Forensic Triage collection scripts can be used with Microsoft's AVML (Acquire Volatile Memory for Linux) memory collection tool (which can be found here: https://github.com/microsoft/avml. ***Note: Microsofts AVML is not included with this software and must be downloaded separately.***
 
-****HOW TO USE THE BASELINE SCRIPT****
+_****HOW TO USE THE BASELINE SCRIPT****_
   1.  On a separate system, format the USB flash drive using "ExFAT" and re-name the drive to "FORENSICS" (CASE SENSITIVE and without the quotes).
   2.  Copy all of the scripts from this repository along with any other programs or scripts needed (i.e. AVML) to the USB flash drive.
   3.  Connect the USB flash drive to the machine.
@@ -56,4 +56,12 @@ The Linux Baseline & Forensics Triage tool is easily customizable and can be mod
   
       $ sudo umount /dev/FORENSICS
   
-  15. Remove the USB flash drive from the machine and review the findings.
+  15. Remove the USB flash drive from the machine and review the collection on a separate machine.
+
+  
+  
+  
+  
+  
+  
+  
