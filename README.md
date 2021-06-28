@@ -7,12 +7,12 @@
 
 ## _***About***_
 
-The **Linux Baseline & Forensic Triage** tool is a BASH shell script designed to give system administrators and incident responders a simple and easy to use tool for LIVE linux machines. The script uses native commands to most Unix/Linux distributions (no need to install any software or packages) to help establish a baseline of "normalcy" for the system. The baseline collection reports can be compared to the forensic triage collections to help quickly identify abnormalities or evidence of system compromise. The Linux Baseline & Forensic Triage tool is designed to be run from a removable USB storage device and the report(s), log file(s), and collected triage files are stored OFF-LINE away from the system/network. Idealy, the script would be run after the machine has been setup and configured but before the machine is deployed into the production environment. For best results, the script should be re-run regularly thereafter. The report files are saved in a "Hostname"."Date".log file name format allowing the reports to be kept for historical/comparative analysis of the machine. This tool IS NOT designed to replace normal log file collection and retention. The tool IS designed to supplemnt log file analysis by giving a quick and easy way to identify any changes based on historical baseline collections and compared to the currrent collection.   
+The **Linux Baseline & Forensic Triage** tool is a BASH shell script designed to give system administrators and incident responders a simple and easy to use tool for LIVE Linux machines. The script uses native commands to most Unix/Linux distributions to help establish a baseline of "normalcy" for the system. The baseline collection reports can be compared to the forensic triage collections to help quickly identify abnormalities or evidence of system compromise. The Linux Baseline & Forensic Triage tool is designed to be run from a removable USB storage device and the report(s), log file(s), and collected triage files are stored OFF-LINE away from the system/network. Ideally, the script would be run after the machine has been setup and configured but before the machine is deployed into the production environment. For best results, the script should be re-run regularly thereafter. The report files are saved in a "Hostname"."Date".log file name format allowing the reports to be kept for historical/comparative analysis of the machine. This tool IS NOT designed to replace normal log file collection and retention. The tool IS designed to supplement log file analysis by giving a quick and easy way to identify any changes based on historical baseline collections and compared to the current collection.   
 
 **The BASELINE script** gathers useful information about the system:
   1. Operating system information and statistics.
   2. Specific hardware information. 
-  3. Netwoking configurations and statistics.
+  3. Networking configurations and statistics.
   4. List of running processes.
   5. List of users, groups, and privileges. 
   6. Complete directory listing of all files.
@@ -50,17 +50,17 @@ The Linux Baseline & Forensics Triage tool is easily customizable and can be mod
       If everything worked correctly you will be given a success message and are returned to the main menu.
       If the mount point location is incorrect you will be given an error message and you should unmount the drive and repeat steps 5 - 10.
   
-  11. From the menu screen select option 2. "Check for root / sudo priviliges."
+  11. From the menu screen select option 2. "Check for root / sudo privileges."
       This option checks to make sure the script was run with root or sudo privileges. 
       If correct you will be given a success message and returned to the main menu.
-      If you ran the script without root or sudo priviliges you will be given an error message and you should quit the script (option 0) and start over with root /       sudo priviliges.
+      If you ran the script without root or sudo privileges you will be given an error message and you should quit the script (option 0) and start over with root /       sudo privileges.
   
-  12. If the above two options worked without incident, selct option 3, for "BASELINE COLLECTION." 
+  12. If the above two options worked without incident, select option 3, for "BASELINE COLLECTION." 
       The baseline collection process will begin and most information is displayed to the screen but is also being written to log file located on the USB flash           drive. Please be patient and allow the script to completely finish. Once the script has finished running you will be returned to the main menu.
   
   13. From the menu screen select option 0, to exit the script.
   
-  14. Using "root" or "sudo" priviliges, unmount the USB flash drive using the following command:
+  14. Using "root" or "sudo" privileges, unmount the USB flash drive using the following command:
   
       `$ sudo umount /dev/FORENSICS`
   
