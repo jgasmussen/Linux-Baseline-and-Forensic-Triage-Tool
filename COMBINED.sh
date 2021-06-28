@@ -38,7 +38,7 @@ if whoami | grep "root"; then
      echo " "
      echo "Congratulations! You have root/sudo privileges..." 
 else
-     echo "!!! YOU ARE NOT ROOT !!!    PLEASE QUIT AND RE-RUN THIS SCRIPT WITH ROOT PRIVILIGES!" && exit
+     echo "!!! YOU ARE NOT ROOT !!!  PLEASE RE-RUN THIS SCRIPT WITH ROOT PRIVILIGES!" && exit
 fi
     echo ""
 }
