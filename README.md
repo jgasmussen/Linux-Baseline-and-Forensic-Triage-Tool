@@ -62,7 +62,7 @@ The Linux Baseline & Forensics Triage tool is easily customizable and can be mod
   
   14. Using "root" or "sudo" privileges, unmount the USB flash drive using the following command:
   
-      `$ sudo umount /dev/FORENSICS`
+      `$ sudo umount /mnt/FORENSICS`
   
   15. Remove the USB flash drive from the machine and review the collection on a separate machine.
 
