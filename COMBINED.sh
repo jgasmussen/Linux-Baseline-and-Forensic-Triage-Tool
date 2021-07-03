@@ -159,10 +159,22 @@ echo " " >> $DEST/$baseline_collection_log
 cat /etc/sudoers | tee -a  $DEST/$baseline_collection_log
 echo " " >> $DEST/$baseline_collection_log
 echo "======================================================================================" >> $DEST/$baseline_collection_log
-echo "List of ALL accounts on the machine:" >> $DEST/$baseline_collection_log
+echo "List of ALL scheduled jobs:" >> $DEST/$baseline_collection_log
 echo "cat /etc/crontab:" | tee -a $DEST/$baseline_collection_log
 echo " " >> $DEST/$baseline_collection_log
 cat /etc/crontab | tee -a  $DEST/$baseline_collection_log
+echo " " >> $DEST/$baseline_collection_log
+echo "======================================================================================" >> $DEST/$baseline_collection_log
+echo "List of ALL scheduled jobs:" >> $DEST/$baseline_collection_log
+echo "cat /etc/cron.*/:" | tee -a $DEST/$baseline_collection_log
+echo " " >> $DEST/$baseline_collection_log
+cat /etc/cron.*/ | tee -a  $DEST/$baseline_collection_log
+echo " " >> $DEST/$baseline_collection_log
+echo "======================================================================================" >> $DEST/$baseline_collection_log
+echo "List of ALL scheduled jobs:" >> $DEST/$baseline_collection_log
+echo "cat /etc/*.d:" | tee -a $DEST/$baseline_collection_log
+echo " " >> $DEST/$baseline_collection_log
+cat /etc/*.d | tee -a  $DEST/$baseline_collection_log
 echo " " >> $DEST/$baseline_collection_log
 echo "======================================================================================" >> $DEST/$baseline_collection_log
 echo "List of hardware properties as reported by OS (Double Check This Info!):" >> $DEST/$baseline_collection_log
