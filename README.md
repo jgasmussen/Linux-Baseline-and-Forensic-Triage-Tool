@@ -20,57 +20,51 @@
 The Linux Baseline & Forensics Triage tool is easily customizable and can be modified to collect specific data and log files that are specific to your environment. The script can be configured to run other tools to generate or collect information related to your system or environment. For instance, both the FAST and FULL Forensic Triage collection scripts can be used with Microsoft's AVML (Acquire Volatile Memory for Linux) memory collection tool (which can be found here: https://github.com/microsoft/avml). ***Note: Microsoft's AVML is NOT included with this script and must be downloaded separately.***
 
 ## _***HOW TO USE THE BASELINE SCRIPT***_ 
-  1.  On a separate system, format the USB flash drive using "ExFAT" and re-name the drive to "FORENSICS" (CASE SENSITIVE and without the quotes).
-  2.  Copy the script from this repository along with any other programs or scripts needed (i.e. AVML) to the USB flash drive.
-  3.  Make sure you change the file permissions to make the script executable '$ sudo chmod +x COMBINED.sh'
-  4.  Connect the USB flash drive to the machine.
-  5.  Open a terminal / shell / command line window.
-  6.  Using "root" and/or "sudo" privileges create the mount point for the USB flash drive using the following command: 
-  
+  1. On a separate system, format the USB flash drive using "ExFAT" and re-name the drive to "FORENSICS" (CASE SENSITIVE and without the quotes).
+  2. Copy the script from this repository along with any other programs or scripts needed: (i.e. AVML) to the USB flash drive.
+  3. Make sure you change the file permissions to make the script executable: 
+
+        `$ sudo chmod +x COMBINED.sh`
+  4. Connect the USB flash drive to the machine.
+  5. Open a terminal / shell / command line window.
+  6. Using "root" and/or "sudo" privileges create the mount point for the USB flash drive using the following command: 
+ 
        `$ sudo mkdir /mnt/FORENSICS`
   
-  7.  Using "root" or "sudo" privileges find the device name of the USB flash drive or USB external hard drive: 
+  7. Using "root" or "sudo" privileges find the device name of the USB flash drive or USB external hard drive: 
   
        `$ sudo fdisk -l | grep FORENSICS`
   
-  8.  Once you have identified your device path from the output of Step 6, mount the device using the following command: 
+  8. Once you have identified your device path from the output of Step 6, mount the device using the following command: 
   
        `$ sudo mount /dev/sdb1 /mnt/FORENSICS`  
        ###### NOTICE: Your device path may be different! ######
   
-  9.  Change directories to the USB flash drive: 
+  9. Change directories to the USB flash drive: 
  
        `$ cd /mnt/FORENSICS`
   
-  10.  Run the following command:
+ 10. Run the following command:
   
        `$ sudo ./COMBINED.sh`
   
-  11. From the menu screen select option 1. "Check for correct mount location."
-      This option checks to make sure the script and destination USB flash drive are properly mounted at "/mnt/FORENSICS/".
-      If everything worked correctly you will be given a success message and are returned to the main menu.
-      If the mount point location is incorrect you will be given an error message and you should unmount the drive and repeat steps 5 - 10.
+ 11. From the menu screen select option 1. "Check for correct mount location."
+     This option checks to make sure the script and destination USB flash drive are properly mounted at "/mnt/FORENSICS/".
+     If everything worked correctly you will be given a success message and are returned to the main menu.
+     If the mount point location is incorrect you will be given an error message and you should unmount the drive and repeat steps 5 - 10.
   
-  12. From the menu screen select option 2. "Check for root / sudo privileges."
-      This option checks to make sure the script was run with root or sudo privileges. 
-      If correct you will be given a success message and returned to the main menu.
-      If you ran the script without root or sudo privileges you will be given an error message and you should quit the script (option 0) and start over with             root/sudo privileges.
+ 12. From the menu screen select option 2. "Check for root / sudo privileges."
+     This option checks to make sure the script was run with root or sudo privileges. 
+     If correct you will be given a success message and returned to the main menu.
+     If you ran the script without root or sudo privileges you will be given an error message and you should quit the script (option 0) and start over with            root/sudo privileges.
   
-  13. If the above two options worked without incident, select option 3, for "BASELINE COLLECTION." 
-      The baseline collection process will begin and most information is displayed to the screen but is also being written to log file located on the USB flash           drive. Please be patient and allow the script to completely finish. Once the script has finished running you will be returned to the main menu.
+ 13. If the above two options worked without incident, select option 3, for "BASELINE COLLECTION." 
+     The baseline collection process will begin and most information is displayed to the screen but is also being written to log file located on the USB flash          drive. Please be patient and allow the script to completely finish. Once the script has finished running you will be returned to the main menu.
   
-  14. From the menu screen select option 0, to exit the script.
+ 14. From the menu screen select option 0, to exit the script.
   
-  15. Using "root" or "sudo" privileges, unmount the USB flash drive using the following command:
+ 15. Using "root" or "sudo" privileges, unmount the USB flash drive using the following command:
   
       `$ sudo umount /mnt/FORENSICS`
   
-  16. Remove the USB flash drive from the machine and review the collection on a separate machine.
-
-  
-  
-  
-  
-  
-  
-  
+ 16. Remove the USB flash drive from the machine and review the collection on a separate machine.
