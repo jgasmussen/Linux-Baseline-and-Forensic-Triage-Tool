@@ -43,7 +43,7 @@ The Linux Baseline & Forensics Triage tool is easily customizable and can be mod
   
   9.  Run the following command:
   
-       `$ ./bcft.sh`
+       `$ ./COMBINED.sh`
   
   10. From the menu screen select option 1. "Check for correct mount location."
       This option checks to make sure the script and destination USB flash drive are properly mounted at "/mnt/FORENSICS/".
