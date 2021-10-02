@@ -1406,4 +1406,4 @@ $(ColorBlue 'Choose an option:') "
 }
 
 # Call the menu function
-menu
+menu 
