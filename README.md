@@ -1,4 +1,4 @@
-# BETA Linux Baseline & Forensic Triage Tool BETA
+# BETA - Linux Baseline & Forensic Triage Tool - BETA
   - #### **No more cheatsheets.**
   - #### **No more mistakes typing out long commands.**
   - #### **Run a few basic commands and done!**
