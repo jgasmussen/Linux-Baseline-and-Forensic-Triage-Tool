@@ -475,7 +475,7 @@ echo " " >> $DEST/$FAST_log
 echo "DONE!" | tee -a $DEST/$FAST_log
 echo " " >> $DEST/$FAST_log
 echo "======================================================================================" >> $DEST/$FAST_log
-sleep 5
+sleep 10
 echo "Starting MD5 HASH of the collected AVML Memory File: $memory_image ..." | tee -a $DEST/$FAST_log
 echo " " >> $DEST/$FAST_log
 echo "md5sum=$(md5sum /mnt/FORENSICS/*.mem)" | tee -a $DEST/$FAST_log
