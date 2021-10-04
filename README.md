@@ -24,7 +24,7 @@ The Linux Baseline & Forensics Triage tool is easily customizable and can be mod
   2. Copy the script from this repository along with any other programs or scripts needed: (i.e. AVML) to the USB flash drive.
   3. Make sure you change the file permissions to make the script executable: 
 
-        `$ sudo chmod +x COMBINED.sh`
+        `$ sudo chmod +x LBFTT.sh`
   4. Connect the USB flash drive to the machine.
   5. Open a terminal / shell / command line window.
   6. Using "root" and/or "sudo" privileges create the mount point for the USB flash drive using the following command: 
@@ -46,7 +46,7 @@ The Linux Baseline & Forensics Triage tool is easily customizable and can be mod
   
  10. Run the following command:
   
-       `$ sudo ./COMBINED.sh`
+       `$ sudo ./LBFTT.sh`
   
  11. From the menu screen select option 1. "Check for correct mount location."
      This option checks to make sure the script and destination USB flash drive are properly mounted at "/mnt/FORENSICS/".
