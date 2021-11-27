@@ -860,7 +860,7 @@ echo " " >> $DEST/$FAST_log
 echo "FAST TRIAGE COLLECTION COMPLETE!" | tee -a $DEST/$FAST_log
 date +"%m/%d/%Y %T" | tee -a $DEST/$FAST_log
 exit
-    echo ""
+    echo "" 
 }
 
 #====================================================#
