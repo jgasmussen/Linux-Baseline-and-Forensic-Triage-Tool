@@ -5,7 +5,7 @@
 #----------------------------------------------------#
 #           Written by: John G. Asmussen             #
 #         EGA Technology Specialists, LLC.           #
-#                     (c) 2021                       #
+#                   GNU GPL v 3.0                    #
 ######################################################
 
 server_name=$(hostname)
@@ -71,7 +71,7 @@ echo "*  Linux Baseline & Forensic Triage Collection Tool  *" >> $DEST/$baseline
 echo "*----------------------------------------------------*" >> $DEST/$baseline_collection_log
 echo "*           Written by: John G. Asmussen             *" >> $DEST/$baseline_collection_log
 echo "*         EGA Technology Specialists, LLC.           *" >> $DEST/$baseline_collection_log
-echo "*                     (c) 2021                       *" >> $DEST/$baseline_collection_log
+echo "*                   GNU GPL v 3.0                    *" >> $DEST/$baseline_collection_log
 echo "******************************************************" >> $DEST/$baseline_collection_log
 echo " " >> $DEST/$baseline_collection_log
 echo " " >> $DEST/$baseline_collection_log
@@ -452,7 +452,7 @@ echo "*  Linux Baseline & Forensic Triage Collection Tool  *" >> $DEST/$FAST_log
 echo "*----------------------------------------------------*" >> $DEST/$FAST_log
 echo "*           Written by: John G. Asmussen             *" >> $DEST/$FAST_log
 echo "*         EGA Technology Specialists, LLC.           *" >> $DEST/$FAST_log
-echo "*                     (c) 2021                       *" >> $DEST/$FAST_log
+echo "*                   GNU GPL v 3.0                    *" >> $DEST/$FAST_log
 echo "******************************************************" >> $DEST/$FAST_log
 echo " " >> $DEST/$FAST_log
 echo " " >> $DEST/$FAST_log
@@ -774,7 +774,7 @@ echo "*  Linux Baseline & Forensic Triage Collection Tool  *" >> $hostname-Direc
 echo "*----------------------------------------------------*" >> $hostname-Directory_Listing.txt
 echo "*           Written by: John G. Asmussen             *" >> $hostname-Directory_Listing.txt
 echo "*         EGA Technology Specialists, LLC.           *" >> $hostname-Directory_Listing.txt
-echo "*                     (c) 2021                       *" >> $hostname-Directory_Listing.txt
+echo "*                   GNU GPL v 3.0                    *" >> $hostname-Directory_Listing.txt
 echo "******************************************************" >> $hostname-Directory_Listing.txt
 echo " " >> $hostname-Directory_Listing.txt
 echo "DIRECTORY LISTING OF $FAST_collection" >> $hostname-Directory_Listing.txt
@@ -905,7 +905,7 @@ echo "*  Linux Baseline & Forensic Triage Collection Tool  *" >> $DEST/$FULL_log
 echo "*----------------------------------------------------*" >> $DEST/$FULL_log
 echo "*           Written by: John G. Asmussen             *" >> $DEST/$FULL_log
 echo "*         EGA Technology Specialists, LLC.           *" >> $DEST/$FULL_log
-echo "*                     (c) 2021                       *" >> $DEST/$FULL_log
+echo "*                   GNU GPL v 3.0                    *" >> $DEST/$FULL_log
 echo "******************************************************" >> $DEST/$FULL_log
 echo " " >> $DEST/$FULL_log
 echo " " >> $DEST/$FULL_log
@@ -1375,7 +1375,7 @@ $blue
 +                                                    +
 +$clear             Written by: John G. Asmussen   $blue        +
 +$clear           EGA Technology Specialists, LLC. $blue        +
-+$clear                      (c) 2021$blue                      +
++$clear                     GNU GPL v3.0$blue                   +
 +                                                    +
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
