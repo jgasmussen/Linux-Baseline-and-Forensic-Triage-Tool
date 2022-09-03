@@ -35,7 +35,7 @@ The Linux Baseline & Forensics Triage tool is easily customizable and can be mod
   
        `$ sudo fdisk -l | grep FORENSICS`
   
-  8. Once you have identified your device path from the output of Step 6, mount the device using the following command: 
+  8. Once you have identified your device path from the output of Step 7, mount the device using the following command: 
   
        `$ sudo mount /dev/sdb1 /mnt/FORENSICS`  
        ###### NOTICE: Your device path may be different! ######
