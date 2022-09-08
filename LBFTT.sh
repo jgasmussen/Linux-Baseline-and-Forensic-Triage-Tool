@@ -2,7 +2,7 @@
 
 ######################################################
 #       Linux Baseline & Forensic Triage Tool        #
-#                 BETA Version 0.1                   #
+#                 BETA Version 0.2                   #
 #----------------------------------------------------#
 #           Written by: John G. Asmussen             #
 #         EGA Technology Specialists, LLC.           #
@@ -70,7 +70,7 @@ touch $DEST/$baseline_collection_log
 
 echo "******************************************************" >> $DEST/$baseline_collection_log
 echo "*       Linux Baseline & Forensic Triage Tool        *" >> $DEST/$baseline_collection_log
-echo "*                  BETA Version 0.1                  *" >> $DEST/$baseline_collection_log
+echo "*                  BETA Version 0.2                  *" >> $DEST/$baseline_collection_log
 echo "*----------------------------------------------------*" >> $DEST/$baseline_collection_log
 echo "*           Written by: John G. Asmussen             *" >> $DEST/$baseline_collection_log
 echo "*         EGA Technology Specialists, LLC.           *" >> $DEST/$baseline_collection_log
@@ -197,6 +197,11 @@ echo "List of ALL scheduled jobs:" >> $DEST/$baseline_collection_log
 echo "cat /etc/cron.*/:" | tee -a $DEST/$baseline_collection_log
 echo " " >> $DEST/$baseline_collection_log
 cat /etc/cron.*/ | tee -a  $DEST/$baseline_collection_log
+echo " " >> $DEST/$baseline_collection_log
+echo "======================================================================================" >> $DEST/$baseline_collection_log
+echo "List of ALL systemd timers:" >> $DEST/$baseline_collection_log
+echo "systemctl status *timer" >> $DEST/$baseline_collection_log
+systemctl status *timer | tee -a $DEST/$baseline_collection_log
 echo " " >> $DEST/$baseline_collection_log
 echo "======================================================================================" >> $DEST/$baseline_collection_log
 echo "List of ALL scheduled jobs:" >> $DEST/$baseline_collection_log
@@ -478,7 +483,7 @@ echo "Creating Log File...DONE!"
 
 echo "******************************************************" >> $DEST/$FAST_log
 echo "*       Linux Baseline & Forensic Triage Tool        *" >> $DEST/$FAST_log
-echo "*                 BETA Version 0.1                   *" >> $DEST/$FAST_log
+echo "*                 BETA Version 0.2                   *" >> $DEST/$FAST_log
 echo "*----------------------------------------------------*" >> $DEST/$FAST_log
 echo "*           Written by: John G. Asmussen             *" >> $DEST/$FAST_log
 echo "*         EGA Technology Specialists, LLC.           *" >> $DEST/$FAST_log
@@ -804,7 +809,7 @@ echo " " >> $DEST/$FAST_log
 touch $DEST/$hostname-Directory_Listing.txt
 echo "******************************************************" >> $hostname-Directory_Listing.txt
 echo "*       Linux Baseline & Forensic Triage Tool        *" >> $hostname-Directory_Listing.txt
-echo "*                  BETA Version 0.1                  *" >> $hostname-Directory_Listing.txt
+echo "*                  BETA Version 0.2                  *" >> $hostname-Directory_Listing.txt
 echo "*----------------------------------------------------*" >> $hostname-Directory_Listing.txt
 echo "*           Written by: John G. Asmussen             *" >> $hostname-Directory_Listing.txt
 echo "*         EGA Technology Specialists, LLC.           *" >> $hostname-Directory_Listing.txt
@@ -943,7 +948,7 @@ echo "Creating Log File...DONE!"
 
 echo "******************************************************" >> $DEST/$FULL_log
 echo "*       Linux Baseline & Forensic Triage Tool        *" >> $DEST/$FULL_log
-echo "*                  BETA Version 0.1                  *" >> $DEST/$FULL_log
+echo "*                  BETA Version 0.2                  *" >> $DEST/$FULL_log
 echo "*----------------------------------------------------*" >> $DEST/$FULL_log
 echo "*           Written by: John G. Asmussen             *" >> $DEST/$FULL_log
 echo "*         EGA Technology Specialists, LLC.           *" >> $DEST/$FULL_log
@@ -1056,10 +1061,16 @@ echo " " >> $DEST/$FULL_log
 cat /etc/sudoers | tee -a  $DEST/$FULL_log
 echo " " >> $DEST/$FULL_log
 echo "======================================================================================" >> $DEST/$FULL_log
-echo "List of ALL accounts on the machine:" >> $DEST/$FULL_log
+echo "List of ALL scheduled jobs" >> $DEST/$FULL_log
 echo "cat /etc/crontab:" | tee -a $DEST/$FULL_log
 echo " " >> $DEST/$FULL_log
 cat /etc/crontab | tee -a  $DEST/$FULL_log
+echo " " >> $DEST/$FULL_log
+echo "======================================================================================" >> $DEST/$FULL_log
+echo "List of ALL systemd timers:" >> $DEST/$FULL_log
+echo "systemctl status *timer" >> $DEST/$FULL_log
+systemctl status *timer | tee -a $DEST/$FULL_log
+echo " " >> $DEST/$FULL_log
 echo " " >> $DEST/$FULL_log
 echo "======================================================================================" >> $DEST/$FULL_log
 echo "List of hardware properties as reported by OS (Double Check This Info!):" >> $DEST/$FULL_log
@@ -1296,11 +1307,11 @@ echo " " >> $DEST/$FULL_log
 touch $DEST/$hostname-Directory_Listing.txt
 echo "******************************************************" >> $hostname-Directory_Listing.txt
 echo "*       Linux Baseline & Forensic Triage Tool        *" >> $hostname-Directory_Listing.txt
-echo "*                 BETA Version 0.1                   *" >> $hostname-Directory_Listing.txt
+echo "*                 BETA Version 0.2                   *" >> $hostname-Directory_Listing.txt
 echo "*----------------------------------------------------*" >> $hostname-Directory_Listing.txt
 echo "*           Written by: John G. Asmussen             *" >> $hostname-Directory_Listing.txt
 echo "*         EGA Technology Specialists, LLC.           *" >> $hostname-Directory_Listing.txt
-echo "*                     (c) 2021                       *" >> $hostname-Directory_Listing.txt
+echo "*                   GNU GPL v3.0                     *" >> $hostname-Directory_Listing.txt
 echo "******************************************************" >> $hostname-Directory_Listing.txt
 echo " " >> $hostname-Directory_Listing.txt
 echo "DIRECTORY LISTING OF $FAST_collection" >> $hostname-Directory_Listing.txt
@@ -1363,7 +1374,7 @@ echo " " >> $DEST/$FULL_log
 echo "**************************************************************************************" >> $DEST/$FULL_log
 echo "COPYING FORENSIC TRIAGE FILES..." | tee -a $DEST/$FULL_log
 echo "======================================================================================" >> $DEST/$FULL_log
-echo "First, grabbing full file timestamps for all files..." | tee -a $DEST/$FULL_log
+echo "First, collecting the full file timestamps for all files collected..." | tee -a $DEST/$FULL_log
 echo "find $FILES -type f -exec stat {} \; | tee -a $DEST/$FULL_log" | tee -a $DEST/$FULL_log
 find $FILES -type f -exec stat {} \; | tee -a $DEST/$FILE_log
 echo "tar -create --verbose --verbose --verbose --preserve-permissions --acls --xattrs --atime-preserve=system --full-time -f $FULL_collection.tar $FILES" | tee -a $DEST/$FULL_log
@@ -1423,7 +1434,7 @@ $blue
 +                                                    +
 +$clear                  Linux Baseline &         $blue         +
 +$clear                Forensic Triage Tool$blue                +
-+$clear                  Beta Version 0.1$blue                  +
++$clear                  Beta Version 0.2$blue                  +
 +$blue  ________________________________________________  $blue+
 +                                                    +
 +$clear             Written by: John G. Asmussen   $blue        +
