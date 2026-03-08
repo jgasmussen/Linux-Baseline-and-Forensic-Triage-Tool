@@ -3,9 +3,9 @@
 #         Linux Baseline & Forensic Triage Tool (LBFTT)
 #                        Version 1.5
 # ------------------------------------------------------------------------------
-#              Written by: John G. Asmussen
-#            EGA Technology Specialists, LLC.
-#                      GNU GPL v3.0
+#                 Written by: John G. Asmussen
+#               EGA Technology Specialists, LLC.
+#                       GNU GPL v3.0
 # ==============================================================================
 # USAGE:
 #   Interactive : sudo ./LBFTT.sh
@@ -68,6 +68,7 @@ readonly RESET='\e[0m'
 
 # Case directory — set by setup_collection()
 CASE_DIR=""
+COLLECTION_START_EPOCH=0
 
 # ==============================================================================
 # CASE METADATA — populated by create_case(); used in every log header
@@ -338,6 +339,9 @@ setup_collection() {
     MEMORY_IMAGE="${CASE_DIR}/${hn}.${datestamp}.mem"
 
     # Build manifest / chain-of-custody header
+    # Record start epoch for elapsed time calculation at finalization
+    COLLECTION_START_EPOCH=$(date +%s)
+
     cat > "$MANIFEST" <<EOF
 ================================================================================
       Linux Baseline & Forensic Triage Tool (LBFTT) v${TOOL_VERSION}
@@ -355,7 +359,7 @@ setup_collection() {
   SYSTEM INFORMATION
   ------------------
   Hostname    : $(hostname -f 2>/dev/null || hostname)
-  Collection  : $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+  Start Time  : $(date -u '+%Y-%m-%d %H:%M:%S UTC')
   Kernel      : $(uname -r)
   Mode        : ${mode}
   Case Dir    : ${CASE_DIR}
@@ -372,13 +376,26 @@ EOF
 # Append summary footer and self-hash to the manifest
 finalize_manifest() {
     local mode="$1"
+    local end_epoch end_time elapsed_secs elapsed_fmt
+    end_epoch=$(date +%s)
+    end_time=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+    elapsed_secs=$(( end_epoch - COLLECTION_START_EPOCH ))
+
+    # Format elapsed time as Xh Xm Xs
+    local hours minutes seconds
+    hours=$(( elapsed_secs / 3600 ))
+    minutes=$(( (elapsed_secs % 3600) / 60 ))
+    seconds=$(( elapsed_secs % 60 ))
+    elapsed_fmt="${hours}h ${minutes}m ${seconds}s"
+
     {
         echo ""
         printf '%s\n' "$(printf '=%.0s' {1..80})"
         echo "  COLLECTION SUMMARY"
         printf '%s\n' "$(printf '-%.0s' {1..80})"
         echo "  Mode        : ${mode}"
-        echo "  End Time    : $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "  End Time    : ${end_time}"
+        echo "  Elapsed     : ${elapsed_fmt}  (${elapsed_secs}s)"
         echo "  Files saved : $(find "$CASE_DIR" -maxdepth 1 -type f | wc -l)"
         echo "  Total size  : $(du -sh "$CASE_DIR" 2>/dev/null | cut -f1)"
         printf '%s\n' "$(printf '=%.0s' {1..80})"
@@ -1831,19 +1848,38 @@ collect_clamav() {
             echo "    RHEL/CentOS   : yum install clamav clamav-update"
             echo "    Fedora        : dnf install clamav"
             echo ""
-            echo "  Option 2 — Place on USB drive beside this script:"
-            echo "    Copy the clamscan binary to: ${SCRIPT_DIR}/clamscan"
-            echo "    Ensure the binary matches the target system architecture."
-            echo "    Note: ClamAV requires its virus database — also copy:"
-            echo "      /var/lib/clamav/main.cvd (or .cld)"
-            echo "      /var/lib/clamav/daily.cvd (or .cld)"
-            echo "      /var/lib/clamav/bytecode.cvd (or .cld)"
-            echo "    Then set --database= to point to the USB db directory."
+            echo "  Option 2 — Place portable static binary on USB drive:"
+            echo "    Copy the clamscan binary to : ${SCRIPT_DIR}/clamscan"
+            echo "    Copy the database directory to: ${SCRIPT_DIR}/clamav-db/"
+            echo "      ${SCRIPT_DIR}/clamav-db/main.cvd"
+            echo "      ${SCRIPT_DIR}/clamav-db/daily.cvd"
+            echo "      ${SCRIPT_DIR}/clamav-db/bytecode.cvd"
+            echo "    See Instructions_ClamAV_Portable.txt for full build steps."
         } >> "$log"
         msg_warn "clamscan not found — skipping ClamAV scan"
         register_log "$log"
         msg_ok "Saved → $(basename "$log")"
         return 0
+    fi
+
+    # ── Locate virus database — USB takes priority over system ────────────
+    # Priority:
+    #   1. clamav-db/ directory on the USB beside this script
+    #   2. System default (/var/lib/clamav)
+    #   3. No --database flag (let clamscan use its compiled-in default)
+    local db_flag=""
+    local db_source=""
+    local usb_db_dir="${SCRIPT_DIR}/clamav-db"
+
+    if [[ -d "$usb_db_dir" ]] && ls "$usb_db_dir"/*.c?d &>/dev/null 2>&1; then
+        db_flag="--database=${usb_db_dir}"
+        db_source="USB  (${usb_db_dir})"
+    elif [[ -d "/var/lib/clamav" ]] && ls /var/lib/clamav/*.c?d &>/dev/null 2>&1; then
+        db_flag="--database=/var/lib/clamav"
+        db_source="system  (/var/lib/clamav)"
+    else
+        db_flag=""
+        db_source="compiled-in default (no override)"
     fi
 
     # ── Log tool information ──────────────────────────────────────────────
@@ -1852,19 +1888,31 @@ collect_clamav() {
         echo "  Binary source   : ${clamscan_source}"
         echo "  Binary path     : ${clamscan_bin}"
         echo "  ClamAV version  : $("$clamscan_bin" --version 2>/dev/null | head -1)"
+        echo "  Database source : ${db_source}"
         echo ""
         echo "  Virus database info:"
+        local db_dir_check
+        db_dir_check="${usb_db_dir}"
+        [[ -z "$db_flag" || "$db_source" == system* ]] && db_dir_check="/var/lib/clamav"
         if command -v sigtool &>/dev/null; then
-            sigtool --info /var/lib/clamav/main.c?d 2>/dev/null | grep -E "Version|Build|Sigs" || true
-            sigtool --info /var/lib/clamav/daily.c?d 2>/dev/null | grep -E "Version|Build|Sigs" || true
+            sigtool --info "${db_dir_check}"/main.c?d  2>/dev/null | grep -E "Version|Build|Sigs" || true
+            sigtool --info "${db_dir_check}"/daily.c?d 2>/dev/null | grep -E "Version|Build|Sigs" || true
         else
-            ls -lh /var/lib/clamav/*.c?d 2>/dev/null || echo "  Database files not found in /var/lib/clamav/"
+            ls -lh "${db_dir_check}"/*.c?d 2>/dev/null || \
+                echo "  Database files not found in ${db_dir_check}"
         fi
     } >> "$log"
 
     # ── Signature update prompt ───────────────────────────────────────────
     section "$log" "Virus Signature Update"
-    if command -v freshclam &>/dev/null || [[ -x "${SCRIPT_DIR}/freshclam" ]]; then
+    local freshclam_bin=""
+    if command -v freshclam &>/dev/null; then
+        freshclam_bin=$(command -v freshclam)
+    elif [[ -x "${SCRIPT_DIR}/freshclam" ]]; then
+        freshclam_bin="${SCRIPT_DIR}/freshclam"
+    fi
+
+    if [[ -n "$freshclam_bin" ]]; then
         echo ""
         echo -e "  ${YELLOW}[?]${RESET} Updating ClamAV signatures requires network access."
         echo -e "  ${YELLOW}[?]${RESET} Network activity may be undesirable during active investigations."
@@ -1872,11 +1920,14 @@ collect_clamav() {
         read -r update_sigs
 
         if [[ "${update_sigs,,}" == "y" ]]; then
-            local freshclam_bin
-            freshclam_bin=$(command -v freshclam 2>/dev/null || echo "${SCRIPT_DIR}/freshclam")
             msg "  Updating signatures..."
             echo "  Running freshclam to update signatures..." >> "$log"
-            if timeout 120 "$freshclam_bin" >> "$log" 2>&1; then
+            # If using USB database, direct freshclam to update it there
+            local freshclam_args=()
+            if [[ -n "$db_flag" ]]; then
+                freshclam_args+=("--datadir=${usb_db_dir}")
+            fi
+            if timeout 120 "$freshclam_bin" "${freshclam_args[@]}" >> "$log" 2>&1; then
                 msg_ok "  Signatures updated"
                 echo "  Signature update: SUCCESS" >> "$log"
             else
@@ -1905,6 +1956,8 @@ collect_clamav() {
         --max-recursion=10          # limit archive recursion depth
         --suppress-ok-results       # omit OK lines — detections only
     )
+    # Append database flag if a database location was resolved above
+    [[ -n "$db_flag" ]] && SCAN_FLAGS+=("$db_flag")
     # NOTE: --remove is deliberately NOT included.
     # NOTE: --move and --quarantine are deliberately NOT included.
 
@@ -2291,8 +2344,8 @@ print_banner() {
   ║        Linux Baseline & Forensic Triage Tool (LBFTT)         ║
   ║                        Version 1.5                           ║
   ║  ──────────────────────────────────────────────────────────  ║
-  ║                Written by: John G. Asmussen                  ║
-  ║              EGA Technology Specialists, LLC.                ║
+  ║               Written by: John G. Asmussen                   ║
+  ║             EGA Technology Specialists, LLC.                 ║
   ║                       GNU GPL v3.0                           ║
   ╚══════════════════════════════════════════════════════════════╝
 BANNER

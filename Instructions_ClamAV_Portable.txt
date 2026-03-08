@@ -1,0 +1,292 @@
+================================================================================
+       HOW TO COMPILE CLAMAV AS A STATIC PORTABLE EXECUTABLE
+                   For Use with LBFTT on a Forensic USB Drive
+                       EGA Technology Specialists, LLC.
+================================================================================
+
+OVERVIEW
+--------
+These instructions produce a fully static clamscan binary that can be placed
+on a forensic USB drive and run on any x86_64 Linux system without installation.
+Compile on a system that matches the target architecture (x86_64 is standard).
+Ideally use the same or similar Linux distribution as your typical target systems
+to avoid glibc version mismatches.
+
+
+================================================================================
+STEP 1 — INSTALL BUILD DEPENDENCIES
+================================================================================
+
+Debian / Ubuntu:
+----------------
+  sudo apt update
+  sudo apt install -y \
+      build-essential \
+      cmake \
+      pkg-config \
+      git \
+      python3 \
+      python3-pip \
+      libssl-dev \
+      libz-dev \
+      libbz2-dev \
+      libpcre2-dev \
+      libncurses5-dev \
+      libxml2-dev \
+      libjson-c-dev \
+      libcurl4-openssl-dev \
+      musl-tools \
+      musl-dev
+
+RHEL / CentOS / Fedora:
+-----------------------
+  sudo dnf install -y \
+      gcc \
+      gcc-c++ \
+      cmake \
+      make \
+      pkg-config \
+      git \
+      python3 \
+      openssl-devel \
+      zlib-devel \
+      bzip2-devel \
+      pcre2-devel \
+      ncurses-devel \
+      libxml2-devel \
+      json-c-devel \
+      libcurl-devel \
+      musl-gcc
+
+
+================================================================================
+STEP 2 — INSTALL RUST (REQUIRED BY CLAMAV 1.x)
+================================================================================
+
+ClamAV 1.0 and later require Rust for its bytecode interpreter and other
+components. The system package is often too old — install via rustup:
+
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+  source "$HOME/.cargo/env"
+  rustup default stable
+  rustup target add x86_64-unknown-linux-musl
+
+NOTE: The x86_64-unknown-linux-musl target is critical — this produces a truly
+static binary via musl libc instead of glibc.
+
+
+================================================================================
+STEP 3 — CLONE CLAMAV SOURCE
+================================================================================
+
+  git clone https://github.com/Cisco-Talos/clamav.git
+  cd clamav
+  git tag -l | grep -E "^clamav-[0-9]" | sort -V | tail -5
+
+Check the tag list and checkout the latest stable release.
+Do NOT build from main/HEAD for a forensic tool:
+
+  git checkout clamav-1.4.1
+
+  (substitute the latest stable tag from the list above)
+
+
+================================================================================
+STEP 4 — CONFIGURE THE BUILD
+================================================================================
+
+Create a build directory and configure with CMake:
+
+  mkdir build && cd build
+
+  cmake .. \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER=musl-gcc \
+      -DCMAKE_EXE_LINKER_FLAGS="-static" \
+      -DENABLE_STATIC_LIB=ON \
+      -DENABLE_SHARED_LIB=OFF \
+      -DENABLE_CLAMD=OFF \
+      -DENABLE_FRESHCLAM=ON \
+      -DENABLE_MILTER=OFF \
+      -DENABLE_CLAMONACC=OFF \
+      -DENABLE_TESTS=OFF \
+      -DENABLE_EXAMPLES=OFF \
+      -DDISABLE_MPOOL=ON \
+      -DBYTECODE_RUNTIME=interpreter \
+      -DCMAKE_INSTALL_PREFIX=/opt/clamav-static
+
+KEY FLAG REFERENCE
+------------------
+  musl-gcc                   Links against musl libc instead of glibc —
+                             produces a truly portable static binary
+  -static                    Forces static linking of all libraries
+  ENABLE_SHARED_LIB=OFF      Prevents building shared .so files
+  ENABLE_CLAMD=OFF           Skips the daemon — only clamscan is needed
+  ENABLE_MILTER=OFF          Skips mail filter integration — not needed
+  ENABLE_CLAMONACC=OFF       Skips on-access scanning daemon — not needed
+  ENABLE_TESTS=OFF           Skips test suite — speeds up build
+  DISABLE_MPOOL=ON           Disables memory pool allocator — improves
+                             stability in single-scan use
+  BYTECODE_RUNTIME=          Uses the built-in bytecode interpreter instead
+    interpreter              of LLVM — avoids LLVM as a dependency
+
+
+================================================================================
+STEP 5 — BUILD
+================================================================================
+
+  make -j$(nproc)
+
+This will take several minutes. $(nproc) uses all available CPU cores to
+parallelize the build.
+
+
+================================================================================
+STEP 6 — VERIFY THE BINARY IS TRULY STATIC
+================================================================================
+
+Before doing anything else, confirm the binary has no dynamic dependencies:
+
+  file clamscan/clamscan
+  ldd clamscan/clamscan
+
+Expected output from file:
+  clamscan: ELF 64-bit LSB executable, x86_64, statically linked, stripped
+
+Expected output from ldd:
+  not a dynamic executable
+
+If ldd lists any libraries, the binary is NOT fully static. The most common
+culprit is NSS (name service switching) — glibc pulls it in dynamically even
+when static linking is requested. musl-gcc avoids this, which is why it is
+specified in Step 4. If you still see dynamic links, verify that musl-gcc was
+used and not the system gcc.
+
+
+================================================================================
+STEP 7 — INSTALL AND COLLECT FILES
+================================================================================
+
+  make install
+
+This installs to /opt/clamav-static as specified by CMAKE_INSTALL_PREFIX.
+The files you need for the USB are:
+
+  ls -lh /opt/clamav-static/bin/
+
+You need:
+  clamscan    — the scanner binary                      (required)
+  freshclam   — the signature updater                   (recommended)
+  sigtool     — for inspecting database files           (optional)
+
+
+================================================================================
+STEP 8 — DOWNLOAD THE VIRUS DATABASES
+================================================================================
+
+The databases are not included in the source and must be downloaded separately:
+
+  mkdir -p /opt/clamav-static/share/clamav
+
+  wget https://database.clamav.net/main.cvd \
+      -O /opt/clamav-static/share/clamav/main.cvd
+
+  wget https://database.clamav.net/daily.cvd \
+      -O /opt/clamav-static/share/clamav/daily.cvd
+
+  wget https://database.clamav.net/bytecode.cvd \
+      -O /opt/clamav-static/share/clamav/bytecode.cvd
+
+Alternatively, use freshclam with a config pointing to the USB path:
+
+  cat > /tmp/freshclam-usb.conf <<EOF
+  DatabaseDirectory /opt/clamav-static/share/clamav
+  UpdateLogFile /tmp/freshclam.log
+  EOF
+
+  /opt/clamav-static/bin/freshclam --config-file=/tmp/freshclam-usb.conf
+
+
+================================================================================
+STEP 9 — COPY TO USB
+================================================================================
+
+  cp /opt/clamav-static/bin/clamscan  /mnt/FORENSICS/clamscan
+  cp /opt/clamav-static/bin/freshclam /mnt/FORENSICS/freshclam
+  chmod +x /mnt/FORENSICS/clamscan /mnt/FORENSICS/freshclam
+
+  mkdir -p /mnt/FORENSICS/clamav-db
+  cp /opt/clamav-static/share/clamav/*.cvd /mnt/FORENSICS/clamav-db/
+
+Final USB layout should look like:
+
+  /mnt/FORENSICS/
+  ├── LBFTT.sh
+  ├── clamscan                  ← static binary
+  ├── freshclam                 ← static binary
+  ├── avml                      ← (if used)
+  ├── lime-<kernel>.ko          ← (if used)
+  └── clamav-db/
+      ├── main.cvd
+      ├── daily.cvd
+      └── bytecode.cvd
+
+
+================================================================================
+STEP 10 — TEST ON A CLEAN SYSTEM
+================================================================================
+
+Before relying on this in the field, test on a machine that has never had
+ClamAV installed:
+
+  # Should run without any library errors
+  /mnt/FORENSICS/clamscan --version
+
+  # Point to the USB database directory explicitly
+  /mnt/FORENSICS/clamscan \
+      --database=/mnt/FORENSICS/clamav-db \
+      --infected \
+      --recursive \
+      /tmp
+
+
+================================================================================
+LBFTT INTEGRATION NOTE
+================================================================================
+
+Since the databases live in a clamav-db/ subdirectory on the USB rather than
+the system default (/var/lib/clamav/), the collect_clamav() function in LBFTT
+should have the following flag added to its SCAN_FLAGS array:
+
+  --database="${SCRIPT_DIR}/clamav-db"
+
+LBFTT is designed to automatically use the USB database if the clamav-db/
+directory exists alongside the script, and fall back to the system database
+if it does not — so it works correctly whether ClamAV is installed on the
+target system or deployed entirely from the USB.
+
+To request this update to LBFTT, ask Claude to add USB database path detection
+to the collect_clamav() function.
+
+
+================================================================================
+KEEPING SIGNATURES CURRENT
+================================================================================
+
+Virus signatures should be updated before each deployment. To update the
+database files on the USB without internet access on the target system,
+run freshclam on your build/admin workstation and copy the updated .cvd files
+back to the clamav-db/ directory on the USB:
+
+  /mnt/FORENSICS/freshclam \
+      --config-file=/tmp/freshclam-usb.conf \
+      --datadir=/mnt/FORENSICS/clamav-db
+
+ClamAV releases daily signature updates. For active investigations, signatures
+should be no more than 24 hours old at time of collection. The signature
+database date is recorded in 19_CLAMAV.log by LBFTT at scan time.
+
+
+================================================================================
+  EGA Technology Specialists, LLC. — Internal Reference Document
+================================================================================
