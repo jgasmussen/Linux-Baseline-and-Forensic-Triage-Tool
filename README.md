@@ -1,5 +1,5 @@
 # Linux Baseline & Forensic Triage Tool (LBFTT)
-### Version 1.5 — EGA Technology Specialists, LLC.
+### Version 1.5.1 — EGA Technology Specialists, LLC.
 **Author:** John G. Asmussen  
 **License:** GNU General Public License v3.0
 
@@ -17,6 +17,7 @@
 8. [Collection Modules](#collection-modules)
 9. [Memory Acquisition](#memory-acquisition)
 10. [ClamAV Integration](#clamav-integration)
+    - [ClamAV Portable Bundle](#clamav-portable-bundle)
 11. [Chain of Custody & Manifest](#chain-of-custody--manifest)
 12. [Anti-Forensics Detection](#anti-forensics-detection)
 13. [Forensic Safety Guarantees](#forensic-safety-guarantees)
@@ -92,16 +93,19 @@ The forensic USB drive should be organized as follows:
 
 ```
 /mnt/FORENSICS/
-├── LBFTT.sh                        ← this script (executable)
-├── avml                            ← (optional) AVML binary
-├── lime-<kernel-version>.ko        ← (optional) LiME kernel module
+├── LBFTT.sh                                        ← this script (executable)
+├── avml                                            ← (optional) AVML binary
+├── lime-<kernel-version>.ko                        ← (optional) LiME kernel module
 │   e.g. lime-6.8.0-51-generic.ko
-├── clamscan                        ← (optional) ClamAV binary
+├── clamav-1.4.2-portable-x86_64-with-db.tar.gz    ← (optional) portable ClamAV bundle
+├── clamav-1.4.2-portable-x86_64-with-db.tar.gz.sha256  ← bundle chain-of-custody hash
 └── <case directories created here at runtime>
     └── hostname.YYYY-MM-DDTHHMMSSZ.PROFILE/
 ```
 
 Multiple LiME modules for different kernel versions can coexist on the USB. The tool automatically selects the correct one by matching against `uname -r` at runtime.
+
+> **Note:** The legacy `clamscan` bare-binary layout (a single `clamscan` file in `$SCRIPT_DIR`) is still supported as a fallback but is superseded by the portable bundle. See [ClamAV Portable Bundle](#clamav-portable-bundle) for details.
 
 ---
 
@@ -375,6 +379,8 @@ cp lime.ko /mnt/FORENSICS/lime-$(uname -r).ko
 
 AVML is a statically-linked userspace binary from Microsoft that acquires memory via `/dev/crash`, `/proc/kcore`, or `/dev/mem` depending on what the kernel exposes. It requires no compilation and works across kernel versions without preparation — simply placing the binary on the USB is sufficient. The tradeoff is that userspace acquisition is slightly more intrusive than LiME and may be blocked on hardened kernels.
 
+> **Secure Boot / Kernel Lockdown:** On systems with Secure Boot enabled, the kernel lockdown mode is typically set to `[integrity]` or `[confidentiality]`. In these states, unsigned LiME kernel modules **will be blocked from loading** regardless of whether the `.ko` file is present on the USB. AVML is unaffected by lockdown because it operates entirely from userspace. On Secure Boot systems, **AVML is the correct tool** — do not waste time building a LiME module unless you can also sign it with a key enrolled in the MOK database. The `11_MEMORY.log` records both the kernel lockdown state and Secure Boot state to document this constraint for the case file.
+
 **3. Skip — Neither Available**
 
 If neither tool is present, memory acquisition is skipped and the log contains detailed instructions for obtaining and deploying both tools. Collection continues with all remaining modules.
@@ -388,6 +394,178 @@ Before loading LiME, the tool checks whether a LiME module is already loaded fro
 ## ClamAV Integration
 
 ClamAV scanning is included in the **MALWARE/APT** and **FULL IR** profiles. All scanning is performed in strict read-only mode — no files are removed, modified, or quarantined under any circumstances.
+
+### ClamAV Portable Bundle
+
+LBFTT ships with a pre-built, self-contained ClamAV 1.4.2 portable bundle for Linux x86_64. This bundle requires no installation and no root access to extract — simply place it on the forensic USB alongside `LBFTT.sh` and the script handles everything automatically.
+
+#### What the bundle contains
+
+The bundle is a single `.tar.gz` archive that extracts to a complete ClamAV environment:
+
+```
+bundle/
+├── bin/
+│   ├── clamscan.sh       ← wrapper script (use this, not the bare binary)
+│   ├── freshclam.sh      ← wrapper script for signature updates
+│   ├── clamdscan.sh      ← wrapper script for daemon-based scanning
+│   ├── clamscan          ← musl-linked binary (do not call directly)
+│   ├── freshclam         ← musl-linked binary (do not call directly)
+│   ├── clamdscan         ← musl-linked binary (do not call directly)
+│   └── sigtool           ← signature inspection utility
+├── lib/
+│   ├── ld-musl-x86_64.so.1   ← musl libc loader
+│   ├── libclamav.so.*         ← ClamAV library
+│   ├── ca-certificates.crt    ← CA bundle for freshclam HTTPS updates
+│   └── [all required .so dependencies]
+├── etc/
+│   ├── freshclam.conf    ← freshclam configuration
+│   └── clamd.conf        ← clamd configuration
+└── db/
+    ├── main.cvd          ← main virus database (~85 MB, ~3.2M signatures)
+    ├── daily.cvd         ← daily updates (~23 MB, ~355K signatures)
+    └── bytecode.cvd      ← bytecode rules (~276 KB)
+```
+
+The binaries are statically linked against **musl libc** (extracted from Alpine Linux packages) and carry all required shared libraries inside the bundle. They will run on any Linux x86_64 system regardless of what libc version or distributions are installed — including minimal or hardened environments. The wrapper scripts (`clamscan.sh`, `freshclam.sh`) invoke the musl loader explicitly and set required environment variables; always use the wrapper scripts, not the bare binaries.
+
+#### Bundle detection priority
+
+When `collect_clamav` runs, it searches for a ClamAV binary in the following order:
+
+1. **Portable bundle tarball** — any file matching `clamav-*-portable-*.tar.gz` in `$SCRIPT_DIR`. If found, the bundle is extracted to a temporary directory, scanned with, and cleaned up automatically at module exit.
+2. **System-installed clamscan** — `command -v clamscan`
+3. **Bare USB binary** — `$SCRIPT_DIR/clamscan` (legacy fallback)
+
+If none are found, the module logs detailed instructions and skips gracefully without aborting the collection.
+
+#### Building the bundle
+
+The portable bundle is built from Alpine Linux APK packages using the following method. No compilation, no Docker, and no root access required on the build host.
+
+**Prerequisites:** An Ubuntu/Debian x86_64 build host with `wget` and `tar`.
+
+**Step 1 — Download Alpine package index**
+```bash
+wget -q https://dl-cdn.alpinelinux.org/alpine/v3.21/community/x86_64/APKINDEX.tar.gz     -O /tmp/APKINDEX-community.tar.gz
+wget -q https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/APKINDEX.tar.gz     -O /tmp/APKINDEX-main.tar.gz
+mkdir -p /tmp/apk-community /tmp/apk-main
+tar xzf /tmp/APKINDEX-community.tar.gz -C /tmp/apk-community/
+tar xzf /tmp/APKINDEX-main.tar.gz -C /tmp/apk-main/
+```
+
+**Step 2 — Download all required packages**
+
+From the Alpine 3.21 community repository:
+- `clamav-scanner-1.4.2-r0.apk`
+- `clamav-clamdscan-1.4.2-r0.apk`
+- `clamav-libs-1.4.2-r0.apk`
+- `clamav-daemon-1.4.2-r0.apk`
+- `freshclam-1.4.2-r0.apk`
+- `libmspack-0.11_alpha-r1.apk`
+
+From the Alpine 3.21 main repository:
+- `musl-1.2.5-r9.apk`, `libgcc-14.2.0-r4.apk`
+- `libcrypto3-3.3.6-r0.apk`, `libssl3-3.3.6-r0.apk`
+- `libxml2-2.13.9-r0.apk`, `pcre2-10.43-r0.apk`, `json-c-0.18-r0.apk`
+- `zlib-1.3.1-r2.apk`, `bzip2-1.0.8-r6.apk`, `libbz2-1.0.8-r6.apk`
+- `xz-libs-5.6.3-r1.apk`, `libcurl-8.14.1-r2.apk`, `brotli-libs-1.1.0-r2.apk`
+- `c-ares-1.34.6-r0.apk`, `libidn2-2.3.7-r0.apk`, `libpsl-0.21.5-r3.apk`
+- `nghttp2-libs-1.64.0-r0.apk`, `zstd-libs-1.5.6-r2.apk`, `libunistring-1.2-r0.apk`
+
+> **Important:** `freshclam` is a **separate top-level package** in the community repo — it is not bundled inside `clamav-scanner` or `clamav-daemon`. It must be downloaded explicitly.
+
+**Step 3 — Extract packages and assemble bundle**
+```bash
+mkdir -p $HOME/clamav-portable
+cd $HOME/clamav-portable
+mkdir -p bundle/{bin,lib,etc,db}
+
+# Extract each .apk (they are gzip-compressed tar archives)
+for pkg in clamav-scanner clamav-clamdscan clamav-libs clamav-daemon freshclam            libmspack musl libgcc libcrypto3 libssl3 libxml2 pcre2            json-c zlib bzip2 libbz2 xz-libs libcurl brotli-libs c-ares            libidn2 libpsl nghttp2-libs zstd-libs libunistring; do
+    mkdir -p extracted/$pkg
+    tar xzf ${pkg}*.apk -C extracted/$pkg 2>/dev/null || true
+done
+
+# Copy binaries
+cp extracted/clamav-scanner/usr/bin/clamscan     bundle/bin/
+cp extracted/clamav-scanner/usr/bin/sigtool       bundle/bin/
+cp extracted/clamav-clamdscan/usr/bin/clamdscan   bundle/bin/
+cp extracted/freshclam/usr/bin/freshclam          bundle/bin/
+
+# Copy musl loader
+cp extracted/musl/lib/ld-musl-x86_64.so.1        bundle/lib/
+cp extracted/musl/lib/libc.musl-x86_64.so.1      bundle/lib/
+
+# Copy all shared libraries (adjust paths if .so files are in usr/lib/)
+for pkg in clamav-libs libgcc libcrypto3 libssl3 libxml2 pcre2 json-c            zlib libbz2 xz-libs libmspack libcurl brotli-libs c-ares            libidn2 libpsl nghttp2-libs zstd-libs libunistring; do
+    cp extracted/$pkg/usr/lib/*.so* bundle/lib/ 2>/dev/null || true
+done
+
+# Copy configs and CA certificates (required for freshclam HTTPS)
+cp extracted/freshclam/etc/clamav/freshclam.conf bundle/etc/
+cp extracted/clamav-daemon/etc/clamav/clamd.conf bundle/etc/
+cp /etc/ssl/certs/ca-certificates.crt bundle/lib/
+
+# Point freshclam config at runtime DB directory
+sed -i 's|^DatabaseDirectory.*|DatabaseDirectory /tmp/clamav-dfir/db|' bundle/etc/freshclam.conf
+sed -i 's|^#DatabaseDirectory.*|DatabaseDirectory /tmp/clamav-dfir/db|' bundle/etc/freshclam.conf
+```
+
+**Step 4 — Create wrapper scripts**
+```bash
+cat > bundle/bin/clamscan.sh << 'WRAPPER'
+#!/bin/bash
+BUNDLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec "$BUNDLE_DIR/lib/ld-musl-x86_64.so.1"      --library-path "$BUNDLE_DIR/lib"      "$BUNDLE_DIR/bin/clamscan" "$@"
+WRAPPER
+
+cat > bundle/bin/freshclam.sh << 'WRAPPER'
+#!/bin/bash
+BUNDLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+export SSL_CERT_FILE="$BUNDLE_DIR/lib/ca-certificates.crt"
+export CURL_CA_BUNDLE="$BUNDLE_DIR/lib/ca-certificates.crt"
+exec "$BUNDLE_DIR/lib/ld-musl-x86_64.so.1"      --library-path "$BUNDLE_DIR/lib"      "$BUNDLE_DIR/bin/freshclam" "$@"
+WRAPPER
+
+cat > bundle/bin/clamdscan.sh << 'WRAPPER'
+#!/bin/bash
+BUNDLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec "$BUNDLE_DIR/lib/ld-musl-x86_64.so.1"      --library-path "$BUNDLE_DIR/lib"      "$BUNDLE_DIR/bin/clamdscan" "$@"
+WRAPPER
+
+chmod +x bundle/bin/clamscan.sh bundle/bin/freshclam.sh bundle/bin/clamdscan.sh
+```
+
+> **SSL note:** The `SSL_CERT_FILE` and `CURL_CA_BUNDLE` environment variables in `freshclam.sh` are required. Without them, freshclam cannot verify HTTPS connections to the ClamAV signature update servers, causing update failures even when the network is available.
+
+**Step 5 — Download virus databases and package**
+```bash
+# Use absolute path for --datadir — relative paths fail
+bundle/bin/freshclam.sh     --config-file=bundle/etc/freshclam.conf     --datadir=$HOME/clamav-portable/bundle/db
+
+# Package and record SHA-256
+cd $HOME/clamav-portable
+tar czf clamav-1.4.2-portable-x86_64-with-db.tar.gz bundle/
+sha256sum clamav-1.4.2-portable-x86_64-with-db.tar.gz     > clamav-1.4.2-portable-x86_64-with-db.tar.gz.sha256
+```
+
+The final error from freshclam (`NotifyClamd: Can't find clamd.conf`) is harmless — it occurs because clamd is not running, which is expected in an offline bundle.
+
+**Step 6 — Copy to USB**
+```bash
+cp clamav-1.4.2-portable-x86_64-with-db.tar.gz      /mnt/FORENSICS/
+cp clamav-1.4.2-portable-x86_64-with-db.tar.gz.sha256 /mnt/FORENSICS/
+```
+
+#### Verified bundle hashes (build date: March 2026, Alpine 3.21, ClamAV 1.4.2)
+
+| File | SHA-256 |
+|---|---|
+| Bundle without DB | `f72309b63b86bcaa31ab9071be023fbd0cc6c737d62c4ceb0edd5c9aa9ae0a25` |
+| Bundle with DB | `d621f48180f27ffcbbbfe28ac48f70c1316041628c4635f7c8e98ebb30b9cdc5` |
+
+These hashes are recorded for chain-of-custody purposes. If you rebuild the bundle from fresh packages the hashes will differ — record the new hashes in your case documentation.
 
 ### Three-Pass Scan Architecture
 
@@ -568,6 +746,7 @@ All chain-of-custody, hashing, manifest generation, and finalization behavior is
 
 | Version | Changes |
 |---|---|
+| 1.5.1 | **Bug fixes from FULL_IR test run (2026-03-09):** Fixed `awk strtonum()` portability error in `/proc/net` port discrepancy check (was gawk-only, now uses portable `printf` hex conversion); fixed ClamAV double-logging bug where `--log=` and pipe redirect both wrote to the same file concurrently, causing `FOUND` detection lines to be lost or overwritten; fixed ClamAV detection summary `grep` matching its own output text (changed `grep "FOUND"` to `grep ": FOUND"`); fixed `systemd-detect-virt` false "not available" message on physical machines (exit code 1 means "not a VM", not "tool missing"); suppressed `lsattr` `Operation not supported` noise from `/proc/*/map_files/` virtual filesystem entries; added portable ClamAV bundle auto-detection and extraction to `collect_clamav` — bundle tarball matching `clamav-*-portable-*.tar.gz` in `$SCRIPT_DIR` is automatically extracted, used, and cleaned up; added `--config-file` and absolute `--datadir` to freshclam invocation (required for portable bundle); added Secure Boot / kernel lockdown documentation to memory acquisition |
 | 1.5 | Added `collect_clamav` (three-pass ClamAV scan) to MALWARE/APT and FULL IR profiles |
 | 1.4 | Replaced monolithic mode functions with profile-based architecture; added NETWORK IR, WEB INTRUSION, CLOUD IR, MALWARE/APT, INSIDER THREAT profiles; added `require_case_or_confirm()` central case warning; updated CLI to accept all profile names |
 | 1.3 | Added 6 new collection modules: Containers (13), Cloud (14), Anti-Forensics (15), Web App (16), Persistence (17), Secrets (18); augmented Network module with VPN, DNS cache, raw /proc/net tables; augmented System module with GRUB, UEFI, boot integrity; augmented Processes module with TTY artifacts |
