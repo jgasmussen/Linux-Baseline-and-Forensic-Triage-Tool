@@ -1013,7 +1013,7 @@ collect_filesystem_info() {
     run_cmd "$log" "Files with No Valid Owner or Group" \
         find / -xdev \( -nouser -o -nogroup \) -exec ls -la {} \; 2>/dev/null
     run_cmd "$log" "Immutable Files (lsattr -R /)" \
-        lsattr -R / 2>/dev/null
+        bash -c 'lsattr -R / 2>&1 | grep -v "^lsattr: Operation not supported\|^lsattr: Inappropriate ioctl"'
     run_cmd "$log" "Files Modified in Last 24 Hours" \
         find / -xdev -type f -mtime -1 \
             -not -path "*/proc/*" -not -path "*/sys/*" \
@@ -1352,7 +1352,7 @@ collect_anti_forensics() {
         echo ""
         echo "  Listening ports from /proc/net/tcp (hex local_address:port):"
         awk '$4 == "0A" {print $2}' /proc/net/tcp 2>/dev/null | \
-            awk -F: '{printf "%d\n", strtonum("0x"$2)}' | sort -n | uniq
+            awk -F: '{cmd="printf \"%d\" 0x"$2; cmd | getline dec; close(cmd); print dec}' | sort -n | uniq
         echo ""
         echo "  Listening ports from ss -tlnp:"
         ss -tlnp 2>/dev/null | awk 'NR>1 {print $4}' | grep -oE '[0-9]+$' | sort -n | uniq
@@ -1824,16 +1824,44 @@ collect_clamav() {
     } >> "$log"
     msg "Collecting: ClamAV Antivirus Scan..."
 
+    # ── Extract portable bundle if present ───────────────────────────────
+    # The portable ClamAV bundle ships as a single .tar.gz on the USB.
+    # If found, extract it to a temp directory for this run.
+    local bundle_tmp=""
+    local bundle_tarball
+    bundle_tarball=$(ls "${SCRIPT_DIR}"/clamav-*-portable-*.tar.gz 2>/dev/null | head -1)
+
+    if [[ -f "$bundle_tarball" ]]; then
+        bundle_tmp=$(mktemp -d /tmp/clamav-dfir-XXXXXX)
+        msg "  Extracting portable ClamAV bundle to ${bundle_tmp}..."
+        echo "  Extracting bundle: ${bundle_tarball}" >> "$log"
+        if tar xf "$bundle_tarball" -C "$bundle_tmp" --strip-components=1 2>>"$log"; then
+            echo "  Bundle extracted successfully." >> "$log"
+        else
+            msg_warn "  Bundle extraction failed — will fall back to system clamscan"
+            echo "  [WARN] Bundle extraction failed." >> "$log"
+            rm -rf "$bundle_tmp"
+            bundle_tmp=""
+        fi
+    fi
+
     # ── Locate clamscan binary ────────────────────────────────────────────
+    # Priority:
+    #   1. Portable bundle wrapper (clamscan.sh) extracted from USB tarball
+    #   2. System-installed clamscan
+    #   3. Bare clamscan binary directly on USB (legacy support)
     local clamscan_bin=""
     local clamscan_source=""
 
-    if command -v clamscan &>/dev/null; then
+    if [[ -n "$bundle_tmp" && -x "${bundle_tmp}/bin/clamscan.sh" ]]; then
+        clamscan_bin="${bundle_tmp}/bin/clamscan.sh"
+        clamscan_source="USB portable bundle"
+    elif command -v clamscan &>/dev/null; then
         clamscan_bin=$(command -v clamscan)
         clamscan_source="system"
     elif [[ -x "${SCRIPT_DIR}/clamscan" ]]; then
         clamscan_bin="${SCRIPT_DIR}/clamscan"
-        clamscan_source="USB"
+        clamscan_source="USB (bare binary)"
     fi
 
     if [[ -z "$clamscan_bin" ]]; then
@@ -1848,30 +1876,33 @@ collect_clamav() {
             echo "    RHEL/CentOS   : yum install clamav clamav-update"
             echo "    Fedora        : dnf install clamav"
             echo ""
-            echo "  Option 2 — Place portable static binary on USB drive:"
-            echo "    Copy the clamscan binary to : ${SCRIPT_DIR}/clamscan"
-            echo "    Copy the database directory to: ${SCRIPT_DIR}/clamav-db/"
-            echo "      ${SCRIPT_DIR}/clamav-db/main.cvd"
-            echo "      ${SCRIPT_DIR}/clamav-db/daily.cvd"
-            echo "      ${SCRIPT_DIR}/clamav-db/bytecode.cvd"
-            echo "    See Instructions_ClamAV_Portable.txt for full build steps."
+            echo "  Option 2 — Place portable bundle on USB drive (recommended):"
+            echo "    Copy the bundle tarball to the same directory as this script:"
+            echo "      clamav-1.4.2-portable-x86_64-with-db.tar.gz"
+            echo "    See ClamAV-Portable-Bundle-Guide.docx for full build steps."
         } >> "$log"
         msg_warn "clamscan not found — skipping ClamAV scan"
+        [[ -n "$bundle_tmp" ]] && rm -rf "$bundle_tmp"
         register_log "$log"
         msg_ok "Saved → $(basename "$log")"
         return 0
     fi
 
-    # ── Locate virus database — USB takes priority over system ────────────
+    # ── Locate virus database ─────────────────────────────────────────────
     # Priority:
-    #   1. clamav-db/ directory on the USB beside this script
-    #   2. System default (/var/lib/clamav)
-    #   3. No --database flag (let clamscan use its compiled-in default)
+    #   1. db/ directory inside the extracted portable bundle
+    #   2. clamav-db/ directory on the USB beside this script
+    #   3. System default (/var/lib/clamav)
+    #   4. No --database flag (let clamscan use its compiled-in default)
     local db_flag=""
     local db_source=""
     local usb_db_dir="${SCRIPT_DIR}/clamav-db"
 
-    if [[ -d "$usb_db_dir" ]] && ls "$usb_db_dir"/*.c?d &>/dev/null 2>&1; then
+    if [[ -n "$bundle_tmp" && -d "${bundle_tmp}/db" ]] && \
+       ls "${bundle_tmp}/db"/*.c?d &>/dev/null 2>&1; then
+        db_flag="--database=${bundle_tmp}/db"
+        db_source="portable bundle  (${bundle_tmp}/db)"
+    elif [[ -d "$usb_db_dir" ]] && ls "$usb_db_dir"/*.c?d &>/dev/null 2>&1; then
         db_flag="--database=${usb_db_dir}"
         db_source="USB  (${usb_db_dir})"
     elif [[ -d "/var/lib/clamav" ]] && ls /var/lib/clamav/*.c?d &>/dev/null 2>&1; then
@@ -1892,9 +1923,13 @@ collect_clamav() {
         echo ""
         echo "  Virus database info:"
         local db_dir_check
-        db_dir_check="${usb_db_dir}"
+        db_dir_check="${bundle_tmp}/db"
         [[ -z "$db_flag" || "$db_source" == system* ]] && db_dir_check="/var/lib/clamav"
-        if command -v sigtool &>/dev/null; then
+        [[ "$db_source" == USB* ]] && db_dir_check="${usb_db_dir}"
+        if [[ -n "$bundle_tmp" && -x "${bundle_tmp}/bin/sigtool.sh" ]]; then
+            "${bundle_tmp}/bin/sigtool.sh" --info "${db_dir_check}"/main.c?d  2>/dev/null | grep -E "Version|Build|Sigs" || true
+            "${bundle_tmp}/bin/sigtool.sh" --info "${db_dir_check}"/daily.c?d 2>/dev/null | grep -E "Version|Build|Sigs" || true
+        elif command -v sigtool &>/dev/null; then
             sigtool --info "${db_dir_check}"/main.c?d  2>/dev/null | grep -E "Version|Build|Sigs" || true
             sigtool --info "${db_dir_check}"/daily.c?d 2>/dev/null | grep -E "Version|Build|Sigs" || true
         else
@@ -1906,7 +1941,12 @@ collect_clamav() {
     # ── Signature update prompt ───────────────────────────────────────────
     section "$log" "Virus Signature Update"
     local freshclam_bin=""
-    if command -v freshclam &>/dev/null; then
+    local freshclam_conf=""
+
+    if [[ -n "$bundle_tmp" && -x "${bundle_tmp}/bin/freshclam.sh" ]]; then
+        freshclam_bin="${bundle_tmp}/bin/freshclam.sh"
+        freshclam_conf="${bundle_tmp}/etc/freshclam.conf"
+    elif command -v freshclam &>/dev/null; then
         freshclam_bin=$(command -v freshclam)
     elif [[ -x "${SCRIPT_DIR}/freshclam" ]]; then
         freshclam_bin="${SCRIPT_DIR}/freshclam"
@@ -1922,9 +1962,15 @@ collect_clamav() {
         if [[ "${update_sigs,,}" == "y" ]]; then
             msg "  Updating signatures..."
             echo "  Running freshclam to update signatures..." >> "$log"
-            # If using USB database, direct freshclam to update it there
             local freshclam_args=()
-            if [[ -n "$db_flag" ]]; then
+            # Always pass --config-file when using the portable bundle
+            if [[ -n "$freshclam_conf" && -f "$freshclam_conf" ]]; then
+                freshclam_args+=("--config-file=${freshclam_conf}")
+            fi
+            # Always use absolute path for --datadir — relative paths fail
+            if [[ -n "$bundle_tmp" && -d "${bundle_tmp}/db" ]]; then
+                freshclam_args+=("--datadir=${bundle_tmp}/db")
+            elif [[ -n "$db_flag" ]]; then
                 freshclam_args+=("--datadir=${usb_db_dir}")
             fi
             if timeout 120 "$freshclam_bin" "${freshclam_args[@]}" >> "$log" 2>&1; then
@@ -1997,9 +2043,8 @@ collect_clamav() {
     pass1_start=$(date +%s)
     if [[ ${#exe_targets[@]} -gt 0 ]]; then
         "$clamscan_bin" "${SCAN_FLAGS[@]}" \
-            --log="${log}" \
-            "${exe_targets[@]}" 2>&1 | tee -a "$log" | \
-            grep -v "^$" | head -200 || true
+            "${exe_targets[@]}" 2>&1 | \
+            grep -v "^$" | head -200 >> "$log" || true
     else
         echo "  No process exe targets found." >> "$log"
     fi
@@ -2029,7 +2074,6 @@ collect_clamav() {
     pass2_start=$(date +%s)
 
     "$clamscan_bin" "${SCAN_FLAGS[@]}" \
-        --log="${log}" \
         /proc/[0-9]*/fd/ 2>/dev/null | \
         grep -v "^$" | grep -v "Permission denied" | head -500 >> "$log" 2>&1 || true
 
@@ -2097,7 +2141,6 @@ collect_clamav() {
 
     if [[ ${#existing_scan_dirs[@]} -gt 0 ]]; then
         "$clamscan_bin" "${SCAN_FLAGS[@]}" \
-            --log="${log}" \
             "${existing_scan_dirs[@]}" 2>&1 | \
             grep -v "^$" >> "$log" || true
     else
@@ -2123,12 +2166,12 @@ collect_clamav() {
         echo ""
         echo "  Detections (FOUND lines in this log):"
         local detections
-        detections=$(grep -c "FOUND" "$log" 2>/dev/null || echo 0)
+        detections=$(grep -c ": FOUND" "$log" 2>/dev/null || echo 0)
         if [[ "$detections" -gt 0 ]]; then
             echo "  *** ${detections} DETECTION(S) — see FOUND entries above ***"
             echo ""
             echo "  Detection summary:"
-            grep "FOUND" "$log" 2>/dev/null | sed 's/^/    /' || true
+            grep ": FOUND" "$log" 2>/dev/null | sed 's/^/    /' || true
         else
             echo "  No detections found."
         fi
@@ -2138,6 +2181,12 @@ collect_clamav() {
 
     register_log "$log"
     msg_ok "Saved → $(basename "$log")"
+
+    # ── Clean up extracted bundle temp directory ──────────────────────────
+    if [[ -n "$bundle_tmp" && -d "$bundle_tmp" ]]; then
+        rm -rf "$bundle_tmp"
+        msg "  Portable ClamAV bundle cleaned up from ${bundle_tmp}"
+    fi
 }
 
 # ==============================================================================
