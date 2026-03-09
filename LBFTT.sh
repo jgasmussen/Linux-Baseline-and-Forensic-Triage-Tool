@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 #         Linux Baseline & Forensic Triage Tool (LBFTT)
-#                        Version 1.5
+#                        Version 1.5.1
 # ------------------------------------------------------------------------------
 #                 Written by: John G. Asmussen
 #               EGA Technology Specialists, LLC.
@@ -54,7 +54,7 @@ IFS=$'\n\t'
 # GLOBAL CONSTANTS & COLORS
 # ==============================================================================
 readonly DEST="/mnt/FORENSICS"
-readonly TOOL_VERSION="1.5"
+readonly TOOL_VERSION="1.5.1"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Terminal colors
@@ -1045,12 +1045,24 @@ collect_file_listing() {
     {
         echo "  NOTE: Excludes /proc and /sys to prevent hangs."
         echo "  Command: find / -xdev | xargs ls -ladZ --time-style=full-iso"
+        echo "  Start   : $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
         echo ""
     } >> "$log"
+
+    local start end elapsed
+    start=$(date +%s)
 
     find / -xdev \( -path /proc -o -path /sys \) -prune -o \
         -print0 2>/dev/null | \
         xargs -0 ls -ladZ --time-style=full-iso 2>/dev/null >> "$log"
+
+    end=$(date +%s)
+    elapsed=$(( end - start ))
+    {
+        echo ""
+        echo "  End     : $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "  Elapsed : ${elapsed}s"
+    } >> "$log"
 
     register_log "$log"
     msg_ok "Saved → $(basename "$log")"
@@ -1415,17 +1427,41 @@ collect_anti_forensics() {
 
     # ── Timestomping detection ────────────────────────────────────────────
     section "$log" "Timestomping Detection"
-    run_cmd "$log" "Files Where ctime is Significantly Newer than mtime" \
-        bash -c 'find / -xdev -type f -not -path "*/proc/*" -not -path "*/sys/*" \
-                     -not -path "*/run/*" 2>/dev/null | while IFS= read -r f; do
-                     mtime=$(stat -c %Y "$f" 2>/dev/null)
-                     ctime=$(stat -c %Z "$f" 2>/dev/null)
-                     [ -z "$mtime" ] || [ -z "$ctime" ] && continue
-                     diff=$(( ctime - mtime ))
-                     if [ "$diff" -gt 86400 ]; then
-                         echo "DIFF=${diff}s  $(stat -c "%n  mtime=%y  ctime=%z" "$f")"
-                     fi
-                 done 2>/dev/null | sort -rn | head -100'
+    # Timestomping check runs outside run_cmd to avoid the 120s global timeout.
+    # Scoped to high-value paths only (not full filesystem) for performance.
+    # Paths excluded: /proc, /sys, /run, /dev, /snap, /boot (low forensic value
+    # for timestomping; /snap in particular contains thousands of loop-mounted
+    # files that inflate runtime significantly).
+    section "$log" "Files Where ctime is Significantly Newer than mtime"
+    {
+        echo "  Scanning high-value paths for ctime/mtime discrepancies > 24h."
+        echo "  Paths: /bin /sbin /usr/bin /usr/sbin /usr/lib /usr/local"
+        echo "         /etc /home /root /tmp /var/tmp /opt /srv"
+        echo "  Timeout: 600s"
+        echo ""
+        echo "  Scan start: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo ""
+    } >> "$log"
+
+    timeout 600 bash -c '
+        for dir in /bin /sbin /usr/bin /usr/sbin /usr/lib /usr/local                    /etc /home /root /tmp /var/tmp /opt /srv; do
+            [ -d "$dir" ] || continue
+            find "$dir" -xdev -type f 2>/dev/null
+        done | while IFS= read -r f; do
+            mtime=$(stat -c %Y "$f" 2>/dev/null)
+            ctime=$(stat -c %Z "$f" 2>/dev/null)
+            [ -z "$mtime" ] || [ -z "$ctime" ] && continue
+            diff=$(( ctime - mtime ))
+            if [ "$diff" -gt 86400 ]; then
+                echo "DIFF=${diff}s  $(stat -c "%n  mtime=%y  ctime=%z" "$f")"
+            fi
+        done 2>/dev/null | sort -rn | head -100
+    ' >> "$log" 2>&1 || echo "  [WARNING] Timestomping check timed out or returned non-zero." >> "$log"
+
+    {
+        echo ""
+        echo "  Scan complete: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+    } >> "$log"
     run_cmd "$log" "System Binaries Modified After OS Install Date" \
         bash -c 'install_date=$(stat -c %Y /etc/os-release 2>/dev/null || echo 0)
                  find /bin /sbin /usr/bin /usr/sbin -type f 2>/dev/null | while IFS= read -r f; do
@@ -2391,7 +2427,7 @@ print_banner() {
     cat <<'BANNER'
   ╔══════════════════════════════════════════════════════════════╗
   ║        Linux Baseline & Forensic Triage Tool (LBFTT)         ║
-  ║                        Version 1.5                           ║
+  ║                       Version 1.5.1                          ║
   ║  ──────────────────────────────────────────────────────────  ║
   ║               Written by: John G. Asmussen                   ║
   ║             EGA Technology Specialists, LLC.                 ║

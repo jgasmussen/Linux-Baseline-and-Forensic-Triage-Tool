@@ -427,13 +427,13 @@ bundle/
     └── bytecode.cvd      ← bytecode rules (~276 KB)
 ```
 
-The binaries are statically linked against **musl libc** (extracted from Alpine Linux packages) and carry all required shared libraries inside the bundle. They will run on any Linux x86_64 system regardless of what libc version or distributions are installed — including minimal or hardened environments. The wrapper scripts (`clamscan.sh`, `freshclam.sh`) invoke the musl loader explicitly and set required environment variables; always use the wrapper scripts, not the bare binaries.
+The binaries are statically linked against **musl libc** (extracted from Alpine Linux packages) and carry all required shared libraries inside the bundle. They will run on any Linux x86_64 system regardless of what libc version or distribution is installed — including minimal or hardened environments. The wrapper scripts (`clamscan.sh`, `freshclam.sh`) invoke the musl loader explicitly and set required environment variables; always use the wrapper scripts, not the bare binaries.
 
 #### Bundle detection priority
 
 When `collect_clamav` runs, it searches for a ClamAV binary in the following order:
 
-1. **Portable bundle tarball** — any file matching `clamav-*-portable-*.tar.gz` in `$SCRIPT_DIR`. If found, the bundle is extracted to a temporary directory, scanned with, and cleaned up automatically at module exit.
+1. **Portable bundle tarball** — any file matching `clamav-*-portable-*.tar.gz` in `$SCRIPT_DIR`. If found, the bundle is extracted to a temporary directory, used for scanning, and cleaned up automatically at module exit.
 2. **System-installed clamscan** — `command -v clamscan`
 3. **Bare USB binary** — `$SCRIPT_DIR/clamscan` (legacy fallback)
 
@@ -497,7 +497,7 @@ cp extracted/freshclam/usr/bin/freshclam          bundle/bin/
 cp extracted/musl/lib/ld-musl-x86_64.so.1        bundle/lib/
 cp extracted/musl/lib/libc.musl-x86_64.so.1      bundle/lib/
 
-# Copy all shared libraries (adjust paths if .so files are in usr/lib/)
+# Copy all shared libraries
 for pkg in clamav-libs libgcc libcrypto3 libssl3 libxml2 pcre2 json-c            zlib libbz2 xz-libs libmspack libcurl brotli-libs c-ares            libidn2 libpsl nghttp2-libs zstd-libs libunistring; do
     cp extracted/$pkg/usr/lib/*.so* bundle/lib/ 2>/dev/null || true
 done
@@ -673,7 +673,24 @@ Executes `rkhunter` and `chkrootkit` if available on the system. Also checks for
 
 Three layers of timestomping detection:
 
-1. **ctime vs. mtime delta** — Files where the inode change time (`ctime`) is significantly newer than the modification time (`mtime`) may have had their `mtime` manually backdated. A large delta (more than 24 hours by default) is flagged.
+1. **ctime vs. mtime delta** — Files where the inode change time (`ctime`) is significantly newer than the modification time (`mtime`) may have had their `mtime` manually backdated. A large delta (more than 24 hours by default) is flagged. This check runs **outside the standard `run_cmd` wrapper** with a dedicated 600-second timeout and is scoped to the following high-value directories rather than the full filesystem:
+
+   ```
+   /bin  /sbin  /usr/bin  /usr/sbin  /usr/lib  /usr/local
+   /etc  /home  /root  /tmp  /var/tmp  /opt  /srv
+   ```
+
+   **Why scoped and not full-filesystem:** A full `find / -xdev` walk combined with per-file `stat` calls routinely exceeds 120 seconds on systems with large home directories, Rust cargo registries, or Python virtual environments — timing out before producing any output. The scoped path list covers every location where timestomped malware would realistically be staged or installed. Paths excluded from this check include `/snap` (loop-mounted squashfs files inflate runtime with zero forensic value for timestomping), `/boot` (static after install), `/dev`, `/proc`, `/sys`, and `/run`.
+
+   **If `[WARNING] Timestomping check timed out` appears in `15_ANTI_FORENSICS.log`:** The 600-second budget was exhausted before the scan completed. This is most likely caused by an exceptionally large directory tree under one of the scoped paths (e.g. a very large `/home` with many source trees or package caches). To investigate manually, run the check directly against a specific subdirectory:
+   ```bash
+   find /home -xdev -type f | while IFS= read -r f; do
+       mtime=$(stat -c %Y "$f" 2>/dev/null)
+       ctime=$(stat -c %Z "$f" 2>/dev/null)
+       diff=$(( ctime - mtime ))
+       [ "$diff" -gt 86400 ] && echo "DIFF=${diff}s  $(stat -c "%n  mtime=%y  ctime=%z" "$f")"
+   done | sort -rn | head -100
+   ```
 
 2. **Binaries newer than OS install date** — System binaries in `/bin`, `/sbin`, `/usr/bin`, `/usr/sbin` with `mtime` newer than the OS installation date (approximated by `/etc/os-release` timestamp) are flagged as potentially replaced or modified.
 
@@ -690,7 +707,7 @@ LBFTT is designed to be used as evidence-collection software. The following guar
 - **No file deletion or modification** — no file on the target system is ever deleted, moved, renamed, or modified.
 - **No software installation** — LBFTT never installs packages, kernel modules (other than LiME for memory acquisition), or other software on the target system. LiME is unloaded immediately after acquisition completes.
 - **No quarantine** — ClamAV is invoked without `--remove`, `--quarantine`, or `--move` flags. This is documented in code comments and in the ClamAV log's forensic notice block.
-- **Timeout protection** — long-running commands are wrapped with `timeout` to prevent the tool from hanging indefinitely on a single command. Memory acquisition allows 3600 seconds (1 hour); most other commands allow 120 seconds.
+- **Timeout protection** — long-running commands are wrapped with `timeout` to prevent the tool from hanging indefinitely on a single command. Memory acquisition allows 3600 seconds (1 hour); most other commands allow 120 seconds. The timestomping ctime/mtime delta check is an explicit exception — it runs outside `run_cmd` with a dedicated 600-second timeout and a scoped path list to avoid exhausting the standard budget.
 - **Error isolation** — a failure or error in any individual command is logged and the tool continues. `set -euo pipefail` is active at the script level but collection functions use `|| true` patterns to prevent individual command failures from aborting the collection.
 
 ---
@@ -746,7 +763,7 @@ All chain-of-custody, hashing, manifest generation, and finalization behavior is
 
 | Version | Changes |
 |---|---|
-| 1.5.1 | **Bug fixes from FULL_IR test run (2026-03-09):** Fixed `awk strtonum()` portability error in `/proc/net` port discrepancy check (was gawk-only, now uses portable `printf` hex conversion); fixed ClamAV double-logging bug where `--log=` and pipe redirect both wrote to the same file concurrently, causing `FOUND` detection lines to be lost or overwritten; fixed ClamAV detection summary `grep` matching its own output text (changed `grep "FOUND"` to `grep ": FOUND"`); fixed `systemd-detect-virt` false "not available" message on physical machines (exit code 1 means "not a VM", not "tool missing"); suppressed `lsattr` `Operation not supported` noise from `/proc/*/map_files/` virtual filesystem entries; added portable ClamAV bundle auto-detection and extraction to `collect_clamav` — bundle tarball matching `clamav-*-portable-*.tar.gz` in `$SCRIPT_DIR` is automatically extracted, used, and cleaned up; added `--config-file` and absolute `--datadir` to freshclam invocation (required for portable bundle); added Secure Boot / kernel lockdown documentation to memory acquisition |
+| 1.5.1 | **Bug fixes and improvements:** Fixed `awk strtonum()` portability error in `/proc/net` port discrepancy check (gawk-only function replaced with portable `printf` hex conversion); fixed ClamAV double-logging bug where concurrent `--log=` flag and pipe redirect caused `FOUND` detection lines to be lost or overwritten; fixed ClamAV detection summary `grep "FOUND"` self-matching its own output text (changed to `grep ": FOUND"`); fixed `systemd-detect-virt` false "not available" message on physical machines (exit code 1 means not a VM, not a missing tool); suppressed `lsattr` `Operation not supported` noise from `/proc/*/map_files/` virtual filesystem entries; added portable ClamAV 1.4.2 bundle (musl-linked, Alpine APK extraction, ships with signature databases) with auto-detection and extraction in `collect_clamav`; added `--config-file` and absolute `--datadir` to freshclam invocation required for portable bundle; moved timestomping ctime/mtime delta check outside `run_cmd` wrapper with dedicated 600-second timeout; scoped timestomping check to high-value paths (`/bin`, `/sbin`, `/usr/bin`, `/usr/sbin`, `/usr/lib`, `/usr/local`, `/etc`, `/home`, `/root`, `/tmp`, `/var/tmp`, `/opt`, `/srv`) instead of full filesystem to avoid timeout on large home directories; added Secure Boot / kernel lockdown documentation to memory acquisition section |
 | 1.5 | Added `collect_clamav` (three-pass ClamAV scan) to MALWARE/APT and FULL IR profiles |
 | 1.4 | Replaced monolithic mode functions with profile-based architecture; added NETWORK IR, WEB INTRUSION, CLOUD IR, MALWARE/APT, INSIDER THREAT profiles; added `require_case_or_confirm()` central case warning; updated CLI to accept all profile names |
 | 1.3 | Added 6 new collection modules: Containers (13), Cloud (14), Anti-Forensics (15), Web App (16), Persistence (17), Secrets (18); augmented Network module with VPN, DNS cache, raw /proc/net tables; augmented System module with GRUB, UEFI, boot integrity; augmented Processes module with TTY artifacts |
