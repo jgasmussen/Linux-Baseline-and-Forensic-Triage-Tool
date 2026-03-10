@@ -19,10 +19,9 @@
 10. [ClamAV Integration](#clamav-integration)
     - [ClamAV Portable Bundle](#clamav-portable-bundle)
 11. [Chain of Custody & Manifest](#chain-of-custody--manifest)
-12. [Anti-Forensics Detection](#anti-forensics-detection)
-13. [Forensic Safety Guarantees](#forensic-safety-guarantees)
-14. [Adding New Profiles](#adding-new-profiles)
-15. [Changelog](#changelog)
+12. [Forensic Safety Principles](#forensic-safety-principles)
+13. [Adding New Profiles](#adding-new-profiles)
+14. [Changelog](#changelog)
 
 ---
 
@@ -104,8 +103,6 @@ The forensic USB drive should be organized as follows:
 ```
 
 Multiple LiME modules for different kernel versions can coexist on the USB. The tool automatically selects the correct one by matching against `uname -r` at runtime.
-
-> **Note:** The legacy `clamscan` bare-binary layout (a single `clamscan` file in `$SCRIPT_DIR`) is still supported as a fallback but is superseded by the portable bundle. See [ClamAV Portable Bundle](#clamav-portable-bundle) for details.
 
 ---
 
@@ -327,7 +324,58 @@ Cloud-init status, configuration, and all log files. Instance Metadata Service (
 
 ### 15 — Anti-Forensics & Rootkit Indicators
 
-See [Anti-Forensics Detection](#anti-forensics-detection) section for full details.
+The `15_ANTI_FORENSICS.log` module is specifically designed to detect active evasion techniques and rootkit indicators.
+
+#### PID Discrepancy Check
+
+Compares the list of PIDs visible in `/proc` against the list returned by `ps`. Any PID present in `/proc` but absent from `ps` output is a strong indicator of a kernel-level rootkit that hooks the `readdir` system call to hide processes. The tool sorts and diffs both lists and flags any discrepancies explicitly.
+
+#### Network Port Discrepancy Check
+
+Compares listening ports in `/proc/net/tcp` (raw kernel table) against ports reported by `ss`. A rootkit that hooks socket-related system calls to hide network listeners cannot easily hide from the kernel's raw tables, creating a detectable discrepancy.
+
+#### Kernel Symbol Anomalies
+
+Reads `/proc/kallsyms` and reports symbols that fall outside standard kernel sections. Unexpected kernel symbols can indicate a rootkit that has hooked system calls or inserted malicious kernel code.
+
+#### `/dev` Anomaly Detection
+
+Scans `/dev` for files that are not device nodes, symlinks, directories, or pipes. Regular files in `/dev` are a classic rootkit hiding technique — the directory is rarely inspected and most monitoring tools ignore it.
+
+#### Preload Hijacking
+
+Checks `/etc/ld.so.preload` for existence and content. If present, the file is flagged with `[ALERT]` and every library it references is individually hashed. LD_PRELOAD injection is one of the most common userspace rootkit techniques on Linux. Additionally searches for `.so` files in non-standard paths (outside `/lib`, `/lib64`, `/usr/lib`) which may indicate injected shared libraries.
+
+#### Rootkit Scanners
+
+Executes `rkhunter` and `chkrootkit` if available on the system. Also checks for a `chkrootkit` binary placed on the USB drive alongside the script, enabling USB-based rootkit scanning without installing anything on the target system.
+
+#### Timestomping Detection
+
+Three layers of timestomping detection:
+
+1. **ctime vs. mtime delta** — Files where the inode change time (`ctime`) is significantly newer than the modification time (`mtime`) may have had their `mtime` manually backdated. A large delta (more than 24 hours by default) is flagged. This check runs **outside the standard `run_cmd` wrapper** with a dedicated 600-second timeout and is scoped to the following high-value directories rather than the full filesystem:
+
+   ```
+   /bin  /sbin  /usr/bin  /usr/sbin  /usr/lib  /usr/local
+   /etc  /home  /root  /tmp  /var/tmp  /opt  /srv
+   ```
+
+   **Why scoped and not full-filesystem:** A full `find / -xdev` walk combined with per-file `stat` calls routinely exceeds 120 seconds on systems with large home directories, Rust cargo registries, or Python virtual environments — timing out before producing any output. The scoped path list covers every location where timestomped malware would realistically be staged or installed. Paths excluded from this check include `/snap` (loop-mounted squashfs files inflate runtime with zero forensic value for timestomping), `/boot` (static after install), `/dev`, `/proc`, `/sys`, and `/run`.
+
+   **If `[WARNING] Timestomping check timed out` appears in `15_ANTI_FORENSICS.log`:** The 600-second budget was exhausted before the scan completed. This is most likely caused by an exceptionally large directory tree under one of the scoped paths (e.g. a very large `/home` with many source trees or package caches). To investigate manually, run the check directly against a specific subdirectory:
+   ```bash
+   find /home -xdev -type f | while IFS= read -r f; do
+       mtime=$(stat -c %Y "$f" 2>/dev/null)
+       ctime=$(stat -c %Z "$f" 2>/dev/null)
+       diff=$(( ctime - mtime ))
+       [ "$diff" -gt 86400 ] && echo "DIFF=${diff}s  $(stat -c "%n  mtime=%y  ctime=%z" "$f")"
+   done | sort -rn | head -100
+   ```
+
+2. **Binaries newer than OS install date** — System binaries in `/bin`, `/sbin`, `/usr/bin`, `/usr/sbin` with `mtime` newer than the OS installation date (approximated by `/etc/os-release` timestamp) are flagged as potentially replaced or modified.
+
+3. **`debugfs` inode creation time** — On ext4 filesystems, `debugfs` can retrieve the inode creation time (`crtime`), which is not exposed by `stat` and is significantly harder to modify than `mtime`. This provides a ground truth timestamp that is difficult for an attacker to falsify.
 
 ### 16 — Web Servers & Application Artifacts
 
@@ -355,7 +403,7 @@ Memory acquisition is always the first action in any IR profile, before any othe
 
 ### Tool Selection — Priority Order
 
-**1. LiME (Linux Memory Extractor) — Preferred**
+**1. [LiME (Linux Memory Extractor)](https://github.com/504ensicsLabs/LiME) — Preferred**
 
 LiME is a loadable kernel module (LKM) that acquires physical memory from kernel space. Because acquisition happens inside the kernel, there is minimal userspace footprint — the acquisition process itself is not visible to userspace rootkits that hook `ps` or `/proc`. LiME outputs in the native `.lime` format, which is directly compatible with Volatility 3 and Rekall for offline memory analysis.
 
@@ -375,7 +423,7 @@ cd LiME/src && make
 cp lime.ko /mnt/FORENSICS/lime-$(uname -r).ko
 ```
 
-**2. AVML (Acquire Volatile Memory for Linux) — Fallback**
+**2. [AVML (Acquire Volatile Memory for Linux)](https://github.com/microsoft/avml) — Fallback**
 
 AVML is a statically-linked userspace binary from Microsoft that acquires memory via `/dev/crash`, `/proc/kcore`, or `/dev/mem` depending on what the kernel exposes. It requires no compilation and works across kernel versions without preparation — simply placing the binary on the USB is sufficient. The tradeoff is that userspace acquisition is slightly more intrusive than LiME and may be blocked on hardened kernels.
 
@@ -397,7 +445,7 @@ ClamAV scanning is included in the **MALWARE/APT** and **FULL IR** profiles. All
 
 ### ClamAV Portable Bundle
 
-LBFTT ships with a pre-built, self-contained ClamAV 1.4.2 portable bundle for Linux x86_64. This bundle requires no installation and no root access to extract — simply place it on the forensic USB alongside `LBFTT.sh` and the script handles everything automatically.
+LBFTT is compatible with a self-contained portable ClamAV bundle that you build yourself by following the step-by-step instructions in the [Building the bundle](#building-the-bundle) section below. The bundle requires no installation on the target system — once built, place it on the forensic USB alongside `LBFTT.sh` and the script handles detection, extraction, scanning, and cleanup automatically.
 
 #### What the bundle contains
 
@@ -641,66 +689,9 @@ Every log file is hashed with MD5, SHA-1, and SHA-256 after it is written and be
 
 ---
 
-## Anti-Forensics Detection
+## Forensic Safety Principles
 
-The `15_ANTI_FORENSICS.log` module is specifically designed to detect active evasion techniques and rootkit indicators.
-
-### PID Discrepancy Check
-
-Compares the list of PIDs visible in `/proc` against the list returned by `ps`. Any PID present in `/proc` but absent from `ps` output is a strong indicator of a kernel-level rootkit that hooks the `readdir` system call to hide processes. The tool sorts and diffs both lists and flags any discrepancies explicitly.
-
-### Network Port Discrepancy Check
-
-Compares listening ports in `/proc/net/tcp` (raw kernel table) against ports reported by `ss`. A rootkit that hooks socket-related system calls to hide network listeners cannot easily hide from the kernel's raw tables, creating a detectable discrepancy.
-
-### Kernel Symbol Anomalies
-
-Reads `/proc/kallsyms` and reports symbols that fall outside standard kernel sections. Unexpected kernel symbols can indicate a rootkit that has hooked system calls or inserted malicious kernel code.
-
-### `/dev` Anomaly Detection
-
-Scans `/dev` for files that are not device nodes, symlinks, directories, or pipes. Regular files in `/dev` are a classic rootkit hiding technique — the directory is rarely inspected and most monitoring tools ignore it.
-
-### Preload Hijacking
-
-Checks `/etc/ld.so.preload` for existence and content. If present, the file is flagged with `[ALERT]` and every library it references is individually hashed. LD_PRELOAD injection is one of the most common userspace rootkit techniques on Linux. Additionally searches for `.so` files in non-standard paths (outside `/lib`, `/lib64`, `/usr/lib`) which may indicate injected shared libraries.
-
-### Rootkit Scanners
-
-Executes `rkhunter` and `chkrootkit` if available on the system. Also checks for a `chkrootkit` binary placed on the USB drive alongside the script, enabling USB-based rootkit scanning without installing anything on the target system.
-
-### Timestomping Detection
-
-Three layers of timestomping detection:
-
-1. **ctime vs. mtime delta** — Files where the inode change time (`ctime`) is significantly newer than the modification time (`mtime`) may have had their `mtime` manually backdated. A large delta (more than 24 hours by default) is flagged. This check runs **outside the standard `run_cmd` wrapper** with a dedicated 600-second timeout and is scoped to the following high-value directories rather than the full filesystem:
-
-   ```
-   /bin  /sbin  /usr/bin  /usr/sbin  /usr/lib  /usr/local
-   /etc  /home  /root  /tmp  /var/tmp  /opt  /srv
-   ```
-
-   **Why scoped and not full-filesystem:** A full `find / -xdev` walk combined with per-file `stat` calls routinely exceeds 120 seconds on systems with large home directories, Rust cargo registries, or Python virtual environments — timing out before producing any output. The scoped path list covers every location where timestomped malware would realistically be staged or installed. Paths excluded from this check include `/snap` (loop-mounted squashfs files inflate runtime with zero forensic value for timestomping), `/boot` (static after install), `/dev`, `/proc`, `/sys`, and `/run`.
-
-   **If `[WARNING] Timestomping check timed out` appears in `15_ANTI_FORENSICS.log`:** The 600-second budget was exhausted before the scan completed. This is most likely caused by an exceptionally large directory tree under one of the scoped paths (e.g. a very large `/home` with many source trees or package caches). To investigate manually, run the check directly against a specific subdirectory:
-   ```bash
-   find /home -xdev -type f | while IFS= read -r f; do
-       mtime=$(stat -c %Y "$f" 2>/dev/null)
-       ctime=$(stat -c %Z "$f" 2>/dev/null)
-       diff=$(( ctime - mtime ))
-       [ "$diff" -gt 86400 ] && echo "DIFF=${diff}s  $(stat -c "%n  mtime=%y  ctime=%z" "$f")"
-   done | sort -rn | head -100
-   ```
-
-2. **Binaries newer than OS install date** — System binaries in `/bin`, `/sbin`, `/usr/bin`, `/usr/sbin` with `mtime` newer than the OS installation date (approximated by `/etc/os-release` timestamp) are flagged as potentially replaced or modified.
-
-3. **`debugfs` inode creation time** — On ext4 filesystems, `debugfs` can retrieve the inode creation time (`crtime`), which is not exposed by `stat` and is significantly harder to modify than `mtime`. This provides a ground truth timestamp that is difficult for an attacker to falsify.
-
----
-
-## Forensic Safety Guarantees
-
-LBFTT is designed to be used as evidence-collection software. The following guarantees apply:
+LBFTT is designed to be used as evidence-collection software. The following principles govern its behavior:
 
 - **No writes to target filesystem** — all output is written to the forensic USB (`/mnt/FORENSICS`). The only exception is temporary files in `/tmp` used during anti-forensics checks, which are explicitly cleaned up before the module exits.
 - **No process termination** — LBFTT never kills, pauses, or signals any process on the target system.
@@ -763,7 +754,7 @@ All chain-of-custody, hashing, manifest generation, and finalization behavior is
 
 | Version | Changes |
 |---|---|
-| 1.5.1 | **Bug fixes and improvements:** Fixed `awk strtonum()` portability error in `/proc/net` port discrepancy check (gawk-only function replaced with portable `printf` hex conversion); fixed ClamAV double-logging bug where concurrent `--log=` flag and pipe redirect caused `FOUND` detection lines to be lost or overwritten; fixed ClamAV detection summary `grep "FOUND"` self-matching its own output text (changed to `grep ": FOUND"`); fixed `systemd-detect-virt` false "not available" message on physical machines (exit code 1 means not a VM, not a missing tool); suppressed `lsattr` `Operation not supported` noise from `/proc/*/map_files/` virtual filesystem entries; added portable ClamAV 1.4.2 bundle (musl-linked, Alpine APK extraction, ships with signature databases) with auto-detection and extraction in `collect_clamav`; added `--config-file` and absolute `--datadir` to freshclam invocation required for portable bundle; moved timestomping ctime/mtime delta check outside `run_cmd` wrapper with dedicated 600-second timeout; scoped timestomping check to high-value paths (`/bin`, `/sbin`, `/usr/bin`, `/usr/sbin`, `/usr/lib`, `/usr/local`, `/etc`, `/home`, `/root`, `/tmp`, `/var/tmp`, `/opt`, `/srv`) instead of full filesystem to avoid timeout on large home directories; added Secure Boot / kernel lockdown documentation to memory acquisition section |
+| 1.5.1 | **Bug fixes and improvements:** Fixed `awk strtonum()` portability error in `/proc/net` port discrepancy check (gawk-only function replaced with portable `printf` hex conversion); fixed ClamAV double-logging bug where concurrent `--log=` flag and pipe redirect caused `FOUND` detection lines to be lost or overwritten; fixed ClamAV detection summary `grep "FOUND"` self-matching its own output text (changed to `grep ": FOUND"`); fixed `systemd-detect-virt` false "not available" message on physical machines (exit code 1 means not a VM, not a missing tool); suppressed `lsattr` `Operation not supported` noise from `/proc/*/map_files/` virtual filesystem entries; added portable ClamAV 1.4.2 bundle support (musl-linked, Alpine APK extraction, compatible with user-built bundles including signature databases) with auto-detection and extraction in `collect_clamav`; added `--config-file` and absolute `--datadir` to freshclam invocation required for portable bundle; moved timestomping ctime/mtime delta check outside `run_cmd` wrapper with dedicated 600-second timeout; scoped timestomping check to high-value paths (`/bin`, `/sbin`, `/usr/bin`, `/usr/sbin`, `/usr/lib`, `/usr/local`, `/etc`, `/home`, `/root`, `/tmp`, `/var/tmp`, `/opt`, `/srv`) instead of full filesystem to avoid timeout on large home directories; added Secure Boot / kernel lockdown documentation to memory acquisition section |
 | 1.5 | Added `collect_clamav` (three-pass ClamAV scan) to MALWARE/APT and FULL IR profiles |
 | 1.4 | Replaced monolithic mode functions with profile-based architecture; added NETWORK IR, WEB INTRUSION, CLOUD IR, MALWARE/APT, INSIDER THREAT profiles; added `require_case_or_confirm()` central case warning; updated CLI to accept all profile names |
 | 1.3 | Added 6 new collection modules: Containers (13), Cloud (14), Anti-Forensics (15), Web App (16), Persistence (17), Secrets (18); augmented Network module with VPN, DNS cache, raw /proc/net tables; augmented System module with GRUB, UEFI, boot integrity; augmented Processes module with TTY artifacts |

@@ -392,7 +392,7 @@ finalize_manifest() {
         echo ""
         printf '%s\n' "$(printf '=%.0s' {1..80})"
         echo "  COLLECTION SUMMARY"
-        printf '%s\n' "$(printf '-%.0s' {1..80})"
+        printf '%s\n' "$(printf -- '-%.0s' {1..80})"
         echo "  Mode        : ${mode}"
         echo "  End Time    : ${end_time}"
         echo "  Elapsed     : ${elapsed_fmt}  (${elapsed_secs}s)"
@@ -401,7 +401,7 @@ finalize_manifest() {
         printf '%s\n' "$(printf '=%.0s' {1..80})"
         echo ""
         echo "  MANIFEST SELF-HASH  (hash this file to verify collection integrity)"
-        printf '%s\n' "$(printf '-%.0s' {1..80})"
+        printf '%s\n' "$(printf -- '-%.0s' {1..80})"
     } >> "$MANIFEST"
 
     local md5 sha256
@@ -1427,41 +1427,17 @@ collect_anti_forensics() {
 
     # ── Timestomping detection ────────────────────────────────────────────
     section "$log" "Timestomping Detection"
-    # Timestomping check runs outside run_cmd to avoid the 120s global timeout.
-    # Scoped to high-value paths only (not full filesystem) for performance.
-    # Paths excluded: /proc, /sys, /run, /dev, /snap, /boot (low forensic value
-    # for timestomping; /snap in particular contains thousands of loop-mounted
-    # files that inflate runtime significantly).
-    section "$log" "Files Where ctime is Significantly Newer than mtime"
-    {
-        echo "  Scanning high-value paths for ctime/mtime discrepancies > 24h."
-        echo "  Paths: /bin /sbin /usr/bin /usr/sbin /usr/lib /usr/local"
-        echo "         /etc /home /root /tmp /var/tmp /opt /srv"
-        echo "  Timeout: 600s"
-        echo ""
-        echo "  Scan start: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-        echo ""
-    } >> "$log"
-
-    timeout 600 bash -c '
-        for dir in /bin /sbin /usr/bin /usr/sbin /usr/lib /usr/local                    /etc /home /root /tmp /var/tmp /opt /srv; do
-            [ -d "$dir" ] || continue
-            find "$dir" -xdev -type f 2>/dev/null
-        done | while IFS= read -r f; do
-            mtime=$(stat -c %Y "$f" 2>/dev/null)
-            ctime=$(stat -c %Z "$f" 2>/dev/null)
-            [ -z "$mtime" ] || [ -z "$ctime" ] && continue
-            diff=$(( ctime - mtime ))
-            if [ "$diff" -gt 86400 ]; then
-                echo "DIFF=${diff}s  $(stat -c "%n  mtime=%y  ctime=%z" "$f")"
-            fi
-        done 2>/dev/null | sort -rn | head -100
-    ' >> "$log" 2>&1 || echo "  [WARNING] Timestomping check timed out or returned non-zero." >> "$log"
-
-    {
-        echo ""
-        echo "  Scan complete: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-    } >> "$log"
+    run_cmd "$log" "Files Where ctime is Significantly Newer than mtime" \
+        bash -c 'find / -xdev -type f -not -path "*/proc/*" -not -path "*/sys/*" \
+                     -not -path "*/run/*" 2>/dev/null | while IFS= read -r f; do
+                     mtime=$(stat -c %Y "$f" 2>/dev/null)
+                     ctime=$(stat -c %Z "$f" 2>/dev/null)
+                     [ -z "$mtime" ] || [ -z "$ctime" ] && continue
+                     diff=$(( ctime - mtime ))
+                     if [ "$diff" -gt 86400 ]; then
+                         echo "DIFF=${diff}s  $(stat -c "%n  mtime=%y  ctime=%z" "$f")"
+                     fi
+                 done 2>/dev/null | sort -rn | head -100'
     run_cmd "$log" "System Binaries Modified After OS Install Date" \
         bash -c 'install_date=$(stat -c %Y /etc/os-release 2>/dev/null || echo 0)
                  find /bin /sbin /usr/bin /usr/sbin -type f 2>/dev/null | while IFS= read -r f; do
@@ -2202,7 +2178,7 @@ collect_clamav() {
         echo ""
         echo "  Detections (FOUND lines in this log):"
         local detections
-        detections=$(grep -c ": FOUND" "$log" 2>/dev/null || echo 0)
+        detections=$(grep -c ": FOUND" "$log" 2>/dev/null) || detections=0
         if [[ "$detections" -gt 0 ]]; then
             echo "  *** ${detections} DETECTION(S) — see FOUND entries above ***"
             echo ""
